@@ -1,0 +1,65 @@
+# configs/tabular/mlp.yaml
+# @package _global_
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+model:
+  class_path: lmpro.modules.tabular.mlp_reg_cls.MLPRegCls
+  init_args:
+    input_dim: 20
+    hidden_dims: [128, 64, 32]
+    output_dim: 1
+    task_type: regression
+    dropout_rate: 0.2
+    batch_norm: true
+    learning_rate: 5e-4
+    weight_decay: 1e-4
+
+data:
+  class_path: lmpro.datamodules.tabular_dm.TabularDataModule
+  init_args:
+    data_dir: data/synthetic/
+    dataset_type: regression
+    batch_size: 128
+    num_workers: 4
+    pin_memory: true
+    normalize_features: true
+    target_transform: standardize
+
+trainer:
+  max_epochs: 50
+  accelerator: auto
+  devices: 1
+  precision: 32
+  gradient_clip_val: 0.5
+  accumulate_grad_batches: 1
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/tabular/mlp/
+      filename: "mlp-{epoch:02d}-{val_mse:.4f}"
+      monitor: val_mse
+      mode: min
+      save_top_k: 3
+      save_last: true
+
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val_mse
+      mode: min
+      patience: 10
+
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/
+      name: tabular_mlp
+      version: null

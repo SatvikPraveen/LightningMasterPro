@@ -1,0 +1,41 @@
+# configs/tuning/batch_scaler.yaml
+# Configuration for batch size scaling experiments
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+trainer:
+  max_epochs: 2
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  enable_checkpointing: false
+  enable_progress_bar: true
+  logger: false
+
+batch_scaler:
+  mode: power_scaling # power_scaling or binsearch
+  steps_per_trial: 10
+  init_val: 2
+  max_trials: 25
+  batch_arg_name: batch_size
+
+# Base model - can be overridden
+model:
+  learning_rate: 1e-3
+
+# Base data config - will be modified by batch scaler
+data:
+  batch_size: 2
+  num_workers: 2
+
+# No callbacks for batch scaler
+callbacks: []
+
+# Output settings
+output:
+  results_path: "batch_scale_results.json"
+  max_batch_size_path: "max_batch_size.txt"
+  save_results: true

@@ -1,0 +1,62 @@
+# configs/vision/classifier.yaml
+# @package _global_
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+model:
+  class_path: lmpro.modules.vision.classifier.VisionClassifier
+  init_args:
+    backbone: resnet18
+    num_classes: 10
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    dropout_rate: 0.1
+
+data:
+  class_path: lmpro.datamodules.vision_dm.VisionDataModule
+  init_args:
+    data_dir: data/synthetic/
+    dataset_type: CIFAR10
+    batch_size: 64
+    num_workers: 4
+    pin_memory: true
+    image_size: [32, 32]
+    augment: true
+
+trainer:
+  max_epochs: 20
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  gradient_clip_val: 0.5
+  accumulate_grad_batches: 1
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/vision/classifier/
+      filename: "classifier-{epoch:02d}-{val_acc:.3f}"
+      monitor: val_acc
+      mode: max
+      save_top_k: 3
+      save_last: true
+
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val_acc
+      mode: max
+      patience: 7
+
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/
+      name: vision_classifier
+      version: null

@@ -1,0 +1,69 @@
+# configs/tuning/ablation_study.yaml
+# Configuration for systematic ablation studies
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+trainer:
+  max_epochs: 5
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  deterministic: true
+
+# Ablation parameters to sweep
+ablation:
+  experiment_name: "model_architecture_ablation"
+
+  # Parameters to ablate
+  parameters:
+    learning_rate: [1e-4, 3e-4, 1e-3, 3e-3]
+    weight_decay: [0, 1e-5, 1e-4, 1e-3]
+    dropout_rate: [0.0, 0.1, 0.2, 0.3]
+    batch_size: [16, 32, 64, 128]
+
+  # Fixed parameters (not ablated)
+  fixed:
+    num_workers: 2
+    pin_memory: true
+
+  # Metrics to track
+  metrics:
+    - val_loss
+    - val_acc
+    - train_time
+    - gpu_memory
+
+# Base configurations
+model:
+  learning_rate: 1e-3 # Will be overridden by ablation
+  weight_decay: 1e-4 # Will be overridden by ablation
+
+data:
+  batch_size: 32 # Will be overridden by ablation
+  num_workers: 2
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/ablation/${ablation.experiment_name}/
+      filename: "run_{now:%Y%m%d_%H%M%S}-{epoch:02d}"
+      save_top_k: 1
+      monitor: val_loss
+      mode: min
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/ablation/
+      name: ${ablation.experiment_name}
+      version: null
+
+# Output settings
+output:
+  results_dir: "ablation_results/"
+  summary_table: "ablation_summary.csv"
+  best_config: "best_config.yaml"
+  plots_dir: "ablation_plots/"

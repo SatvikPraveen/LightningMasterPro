@@ -1,0 +1,62 @@
+# configs/vision/segmenter.yaml
+# @package _global_
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+model:
+  class_path: lmpro.modules.vision.segmenter.VisionSegmenter
+  init_args:
+    backbone: resnet34
+    num_classes: 21
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    use_aux_loss: true
+
+data:
+  class_path: lmpro.datamodules.vision_dm.VisionDataModule
+  init_args:
+    data_dir: data/synthetic/
+    dataset_type: segmentation
+    batch_size: 16
+    num_workers: 4
+    pin_memory: true
+    image_size: [256, 256]
+    augment: true
+
+trainer:
+  max_epochs: 30
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 4
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/vision/segmenter/
+      filename: "segmenter-{epoch:02d}-{val_iou:.3f}"
+      monitor: val_iou
+      mode: max
+      save_top_k: 3
+      save_last: true
+
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val_iou
+      mode: max
+      patience: 10
+
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/
+      name: vision_segmenter
+      version: null

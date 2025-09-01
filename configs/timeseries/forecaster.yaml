@@ -1,0 +1,67 @@
+# configs/timeseries/forecaster.yaml
+# @package _global_
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+model:
+  class_path: lmpro.modules.timeseries.forecaster.TimeSeriesForecaster
+  init_args:
+    input_dim: 1
+    hidden_dim: 128
+    num_layers: 2
+    sequence_length: 100
+    prediction_length: 10
+    model_type: lstm
+    dropout_rate: 0.1
+    learning_rate: 1e-3
+    weight_decay: 1e-5
+
+data:
+  class_path: lmpro.datamodules.ts_dm.TimeSeriesDataModule
+  init_args:
+    data_dir: data/synthetic/
+    dataset_type: univariate
+    batch_size: 64
+    num_workers: 4
+    pin_memory: true
+    sequence_length: 100
+    prediction_length: 10
+    normalize: true
+
+trainer:
+  max_epochs: 30
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/timeseries/forecaster/
+      filename: "forecaster-{epoch:02d}-{val_mae:.4f}"
+      monitor: val_mae
+      mode: min
+      save_top_k: 3
+      save_last: true
+
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val_mae
+      mode: min
+      patience: 8
+
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/
+      name: timeseries_forecaster
+      version: null
