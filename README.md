@@ -301,7 +301,7 @@ The project follows standard open-source contribution patterns:
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) for complete details.
+MIT License - see [LICENSE](LICENSE) for complete details.
 
 ---
 
