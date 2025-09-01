@@ -1,0 +1,54 @@
+# docker/docker-compose.yml
+version: "3.8"
+
+services:
+  lmpro-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: development
+    container_name: lmpro-dev
+    volumes:
+      - ../src:/workspace/src
+      - ../notebooks:/workspace/notebooks
+      - ../configs:/workspace/configs
+      - ../data:/workspace/data
+      - ../models:/workspace/models
+      - ../logs:/workspace/logs
+    ports:
+      - "8888:8888" # Jupyter
+      - "6006:6006" # TensorBoard
+    environment:
+      - PYTHONPATH=/workspace/src
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+
+  lmpro-training:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    container_name: lmpro-training
+    volumes:
+      - ../data:/workspace/data
+      - ../models:/workspace/models
+      - ../logs:/workspace/logs
+      - ../configs:/workspace/configs
+    environment:
+      - PYTHONPATH=/workspace/src
+    command: python scripts/train.py --config configs/vision/classifier.yaml
+
+  tensorboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    container_name: lmpro-tensorboard
+    volumes:
+      - ../logs:/workspace/logs
+    ports:
+      - "6006:6006"
+    command: tensorboard --logdir=/workspace/logs --host=0.0.0.0 --port=6006
+
+networks:
+  default:
+    name: lmpro-network

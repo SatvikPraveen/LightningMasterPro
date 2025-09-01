@@ -1,0 +1,42 @@
+# configs/tuning/lr_finder.yaml
+# Configuration for learning rate finding experiments
+
+defaults:
+  - /defaults.yaml
+
+seed_everything: 42
+
+trainer:
+  max_epochs: 1
+  accelerator: auto
+  devices: 1
+  precision: 16-mixed
+  enable_checkpointing: false
+  enable_progress_bar: true
+  logger: false
+
+lr_finder:
+  min_lr: 1e-8
+  max_lr: 1e-1
+  num_training_steps: 200
+  mode: exponential
+  early_stop_threshold: 4.0
+  update_attr: true
+
+# Base model - can be overridden
+model:
+  learning_rate: 1e-3
+
+# Base data config - can be overridden
+data:
+  batch_size: 32
+  num_workers: 2
+
+# No callbacks for LR finder
+callbacks: []
+
+# Output settings
+output:
+  plot_path: "lr_finder_plot.png"
+  suggestion_path: "lr_suggestion.json"
+  save_results: true

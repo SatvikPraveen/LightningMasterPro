@@ -1,0 +1,67 @@
+# configs/defaults.yaml
+# Common default settings for all experiments
+
+seed_everything: 42
+
+trainer:
+  max_epochs: 10
+  accelerator: auto
+  devices: auto
+  precision: 16-mixed
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  enable_progress_bar: true
+  enable_model_summary: true
+  deterministic: false
+  benchmark: true
+
+model:
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+
+data:
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints/
+      filename: "{epoch:02d}-{val_loss:.2f}"
+      monitor: val_loss
+      mode: min
+      save_top_k: 3
+      save_last: true
+      verbose: true
+
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val_loss
+      mode: min
+      patience: 5
+      verbose: true
+      strict: true
+
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+
+logger:
+  - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: logs/
+      name: default_experiment
+      version: null
+
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: ${model.learning_rate}
+    weight_decay: ${model.weight_decay}
+
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
+  init_args:
+    T_max: ${trainer.max_epochs}
+    eta_min: 1e-6
