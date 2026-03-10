@@ -38,33 +38,36 @@ class VisionDataModule(LightningDataModule):
         val_transforms: Optional[Callable] = None,
         test_transforms: Optional[Callable] = None,
         split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+        image_size: Optional[list] = None,
         **kwargs
     ):
         super().__init__()
-        
+
         # Save hyperparameters
         self.save_hyperparameters(logger=False)
-        
+
         self.task = task
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
         self.split_ratios = split_ratios
-        
-        # Data configuration
+
+        # Data configuration — apply image_size override if provided
         self.data_config = data_config or VisionDatasetConfig()
-        
+        if image_size is not None:
+            self.data_config.image_size = tuple(image_size)
+
         # Transforms
         self.train_transforms = train_transforms or self._get_default_train_transforms()
         self.val_transforms = val_transforms or self._get_default_val_transforms()
         self.test_transforms = test_transforms or self._get_default_test_transforms()
-        
+
         # Datasets
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
-        
+
         # Data info
         self.dims = None
         self.num_classes = self.data_config.num_classes
@@ -158,7 +161,7 @@ class VisionDataModule(LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
             drop_last=True,
         )
@@ -171,7 +174,7 @@ class VisionDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     
@@ -183,7 +186,7 @@ class VisionDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     

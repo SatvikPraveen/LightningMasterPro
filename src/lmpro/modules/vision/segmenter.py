@@ -10,7 +10,8 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import OneCycleLR, CosineAnnealingLR
-from torchmetrics import JaccardIndex, Dice
+from torchmetrics import JaccardIndex
+from torchmetrics.segmentation import DiceScore as Dice
 from typing import Dict, Any, Optional, List, Tuple, Union
 import numpy as np
 

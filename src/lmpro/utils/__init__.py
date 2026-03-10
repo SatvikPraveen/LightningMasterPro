@@ -18,6 +18,13 @@ from .viz import (
     plot_feature_importance,
     save_plot,
 )
+from .interpretability import (
+    compute_saliency_map,
+    integrated_gradients,
+    feature_importance_perturbation,
+    occlusion_sensitivity,
+    ActivationStatsHook,
+)
 
 __all__ = [
     # Seed utilities
@@ -36,4 +43,11 @@ __all__ = [
     "plot_confusion_matrix",
     "plot_feature_importance",
     "save_plot",
+
+    # Interpretability utilities
+    "compute_saliency_map",
+    "integrated_gradients",
+    "feature_importance_perturbation",
+    "occlusion_sensitivity",
+    "ActivationStatsHook",
 ]

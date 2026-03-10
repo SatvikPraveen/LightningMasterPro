@@ -37,13 +37,15 @@ class TimeSeriesDataModule(LightningDataModule):
         persistent_workers: bool = True,
         dataset_type: str = "univariate",
         split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+        sequence_length: Optional[int] = None,
+        prediction_length: Optional[int] = None,
         **kwargs
     ):
         super().__init__()
-        
+
         # Save hyperparameters
         self.save_hyperparameters(logger=False)
-        
+
         self.task = task
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -51,19 +53,13 @@ class TimeSeriesDataModule(LightningDataModule):
         self.persistent_workers = persistent_workers
         self.dataset_type = dataset_type
         self.split_ratios = split_ratios
-        
-        # Data configuration
+
+        # Data configuration — apply overrides if provided
         self.data_config = data_config or TimeSeriesDatasetConfig()
-        
-        # Datasets
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
-        
-        # Time series info
-        self.sequence_length = self.data_config.sequence_length
-        self.prediction_horizon = self.data_config.prediction_horizon
-        self.num_features = self.data_config.num_features
+        if sequence_length is not None:
+            self.data_config.sequence_length = sequence_length
+        if prediction_length is not None:
+            self.data_config.prediction_horizon = prediction_length
         
     def prepare_data(self) -> None:
         """Download and prepare data (called once per node)"""
@@ -110,7 +106,7 @@ class TimeSeriesDataModule(LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
             drop_last=False,
         )
@@ -123,7 +119,7 @@ class TimeSeriesDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     
@@ -135,7 +131,7 @@ class TimeSeriesDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     

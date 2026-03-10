@@ -119,7 +119,7 @@ class TabularDataModule(LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
             drop_last=False,
         )
@@ -132,7 +132,7 @@ class TabularDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     
@@ -144,7 +144,7 @@ class TabularDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
     

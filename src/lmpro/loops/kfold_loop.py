@@ -6,7 +6,6 @@ K-Fold Cross-Validation Loop for robust model evaluation
 
 import torch
 from torch.utils.data import DataLoader, Subset
-from lightning.pytorch.loops import Loop
 from lightning import LightningModule, Trainer
 from sklearn.model_selection import KFold, StratifiedKFold
 from typing import Any, Dict, List, Optional, Union, Tuple
@@ -17,7 +16,7 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_only
 from copy import deepcopy
 
 
-class KFoldLoop(Loop):
+class KFoldLoop:
     """
     K-Fold Cross-Validation Loop
     

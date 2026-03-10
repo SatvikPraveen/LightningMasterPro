@@ -6,7 +6,6 @@ Curriculum Learning Loop for progressive training difficulty
 
 import torch
 from torch.utils.data import DataLoader, Subset
-from lightning.pytorch.loops import Loop
 from lightning import LightningModule, Trainer
 from typing import Any, Dict, List, Optional, Union, Callable, Tuple
 import numpy as np
@@ -183,7 +182,7 @@ class RandomCurriculum(CurriculumStrategy):
         return schedule
 
 
-class CurriculumLoop(Loop):
+class CurriculumLoop:
     """
     Curriculum Learning Loop
     

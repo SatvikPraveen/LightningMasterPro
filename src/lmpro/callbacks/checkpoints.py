@@ -243,8 +243,10 @@ class EnhancedModelCheckpoint(ModelCheckpoint):
         }
         
         if self.saved_checkpoints:
-            info['oldest_checkpoint'] = min(self.saved_checkpoints, key=os.path.getmtime)
-            info['newest_checkpoint'] = max(self.saved_checkpoints, key=os.path.getmtime)
+            existing = [p for p in self.saved_checkpoints if os.path.exists(p)]
+            if existing:
+                info['oldest_checkpoint'] = min(existing, key=os.path.getmtime)
+                info['newest_checkpoint'] = max(existing, key=os.path.getmtime)
         
         return info
     

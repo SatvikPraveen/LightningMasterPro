@@ -282,7 +282,9 @@ def _plot_classification_predictions(
     cm = confusion_matrix(y_true, y_pred_labels)
     
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names, ax=axes[0])
+                xticklabels=class_names if class_names is not None else list(range(cm.shape[0])),
+                yticklabels=class_names if class_names is not None else list(range(cm.shape[0])),
+                ax=axes[0])
     axes[0].set_title('Confusion Matrix')
     axes[0].set_ylabel('True Label')
     axes[0].set_xlabel('Predicted Label')
@@ -347,8 +349,10 @@ def plot_confusion_matrix(
         title = 'Confusion Matrix'
     
     plt.figure(figsize=figsize)
+    num_classes = cm.shape[0]
+    tick_labels = class_names if class_names is not None else list(range(num_classes))
     sns.heatmap(cm, annot=True, fmt=fmt, cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names)
+                xticklabels=tick_labels, yticklabels=tick_labels)
     
     plt.title(title)
     plt.ylabel('True Label')
