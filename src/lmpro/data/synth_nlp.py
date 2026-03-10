@@ -117,7 +117,8 @@ class SyntheticTextDataset(Dataset):
     def _generate_text_for_class(self, class_id: int, pos_pool: List[str], neg_pool: List[str], 
                                 neut_pool: List[str], filler_pool: List[str]) -> str:
         """Generate text for a specific class"""
-        length = random.randint(self.config.min_sequence_length, self.config.max_sequence_length // 4)
+        word_count_max = max(self.config.min_sequence_length, self.config.max_sequence_length // 4)
+        length = random.randint(self.config.min_sequence_length, word_count_max)
         
         words = []
         

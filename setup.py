@@ -58,8 +58,15 @@ setup(
             "lmpro-train=scripts.train:main",
             "lmpro-predict=scripts.predict:main",
             "lmpro-export=scripts.export_onnx:main",
+            "lmpro-evaluate=scripts.evaluate:main",
+            "lmpro-benchmark=scripts.benchmark:main",
+            "lmpro-generate-data=scripts.generate_data:main",
         ],
     },
+    package_data={
+        "lmpro": ["py.typed"],
+    },
+    include_package_data=True,
     project_urls={
         "Bug Reports": "https://github.com/yourusername/LightningMasterPro/issues",
         "Source": "https://github.com/yourusername/LightningMasterPro",

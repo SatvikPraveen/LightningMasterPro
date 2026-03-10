@@ -148,7 +148,7 @@ class NLPDataModule(LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             collate_fn=self.collate_fn,
             worker_init_fn=worker_init_fn,
             drop_last=True,
@@ -162,7 +162,7 @@ class NLPDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             collate_fn=self.collate_fn,
             worker_init_fn=worker_init_fn,
         )
@@ -175,7 +175,7 @@ class NLPDataModule(LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
             collate_fn=self.collate_fn,
             worker_init_fn=worker_init_fn,
         )

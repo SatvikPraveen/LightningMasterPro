@@ -199,6 +199,12 @@ def timeseries_cli(args=None):
     )
 
 
+def main():
+    """Main entry point for the CLI"""
+    cli = LightningMasterCLI(description="LightningMasterPro General CLI")
+    return cli
+
+
 if __name__ == "__main__":
     # General CLI that can handle all domains
-    cli = LightningMasterCLI(description="LightningMasterPro General CLI")
+    main()

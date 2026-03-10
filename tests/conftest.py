@@ -18,9 +18,9 @@ from lmpro.datamodules.ts_dm import TimeSeriesDataModule
 
 from lmpro.modules.vision.classifier import VisionClassifier
 from lmpro.modules.vision.segmenter import VisionSegmenter
-from lmpro.modules.nlp.char_lm import CharacterLM
+from lmpro.modules.nlp.char_lm import CharacterLanguageModel as CharacterLM
 from lmpro.modules.nlp.sentiment import SentimentClassifier
-from lmpro.modules.tabular.mlp_reg_cls import MLPRegCls
+from lmpro.modules.tabular.mlp_reg_cls import MLPRegressorClassifier as MLPRegCls
 from lmpro.modules.timeseries.forecaster import TimeSeriesForecaster
 
 
@@ -62,7 +62,8 @@ def tabular_datamodule(temp_data_dir):
     """Create tabular datamodule for testing."""
     return TabularDataModule(
         data_dir=str(temp_data_dir),
-        dataset_type="regression",
+        task="regression",
+        dataset_type="simple",
         batch_size=4,
         num_workers=0,
         normalize_features=True
@@ -133,7 +134,7 @@ def mlp_regressor():
         input_dim=20,
         hidden_dims=[64, 32],
         output_dim=1,
-        task_type="regression",
+        task="regression",
         learning_rate=1e-3
     )
 
@@ -143,10 +144,11 @@ def ts_forecaster():
     """Create time series forecaster for testing."""
     return TimeSeriesForecaster(
         input_dim=1,
+        output_dim=1,
+        sequence_length=50,
+        prediction_horizon=5,
         hidden_dim=64,
         num_layers=2,
-        sequence_length=50,
-        prediction_length=5,
         learning_rate=1e-3
     )
 
@@ -178,14 +180,15 @@ def dummy_sentiment_batch():
 @pytest.fixture
 def dummy_tabular_batch():
     """Create dummy tabular batch."""
-    return torch.randn(2, 20), torch.randn(2, 1)
+    return torch.randn(2, 20), torch.randn(2)
 
 
 @pytest.fixture
 def dummy_timeseries_batch():
     """Create dummy time series batch."""
     x = torch.randn(2, 50, 1)
-    y = torch.randn(2, 5, 1)
+    # output_dim=1 and prediction_horizon=5 → forecaster squeezes to (batch, 5)
+    y = torch.randn(2, 5)
     return x, y
 
 

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  lmpro:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: lightningmasterpro:latest
+    container_name: lmpro
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../models:/app/models
+      - ../notebooks:/app/notebooks
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=0
+    command: python scripts/train.py --help
+    
+  lmpro-jupyter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: lightningmasterpro:latest
+    container_name: lmpro-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../models:/app/models
+      - ../notebooks:/app/notebooks
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+    
+  lmpro-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: lightningmasterpro:latest
+    container_name: lmpro-dev
+    volumes:
+      - ..:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    stdin_open: true
+    tty: true
+    command: /bin/bash

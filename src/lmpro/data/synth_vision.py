@@ -260,8 +260,8 @@ class SyntheticSegmentationDataset(Dataset):
         image = torch.randn(c, h, w) * 0.1 + 0.3
         mask = torch.zeros(h, w, dtype=torch.long)
         
-        # Add geometric shapes with labels
-        num_objects = random.randint(1, 4)
+        # Add geometric shapes with labels (obj_id clamped to [1, num_classes-1])
+        num_objects = random.randint(1, min(4, self.config.num_classes - 1) if self.config.num_classes > 1 else 1)
         
         for obj_id in range(1, num_objects + 1):
             shape_type = random.choice(['circle', 'rectangle', 'triangle'])
