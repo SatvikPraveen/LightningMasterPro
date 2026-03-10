@@ -4,8 +4,8 @@
 import os
 import sys
 
-# Make the project package importable
-sys.path.insert(0, os.path.abspath("../../src"))
+# Make the project package importable (path relative to this file's location)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 # -- Project information ──────────────────────────────────────────────────────
 project = "LightningMasterPro"
@@ -26,6 +26,25 @@ extensions = [
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+
+# Mock heavy C-extension dependencies so autodoc works without a full install
+autodoc_mock_imports = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "lightning",
+    "pytorch_lightning",
+    "torchmetrics",
+    "numpy",
+    "pandas",
+    "sklearn",
+    "matplotlib",
+    "seaborn",
+    "PIL",
+    "onnx",
+    "onnxruntime",
+    "shap",
+]
 
 # Autosummary generates stubs automatically
 autosummary_generate = True
