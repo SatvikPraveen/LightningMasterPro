@@ -4,19 +4,17 @@
 Vision DataModule for image classification and segmentation tasks
 """
 
+from typing import Any, Callable, Dict, Optional, Tuple
+
 import torch
-from torch.utils.data import DataLoader, random_split
-from lightning import LightningDataModule
+from lightning.pytorch import LightningDataModule
+from torch.utils.data import DataLoader
 from torchvision import transforms
-from typing import Optional, Dict, Any, Callable, Tuple
-import numpy as np
 
 from ..data.synth_vision import (
-    VisionDatasetConfig, 
-    SyntheticImageDataset, 
-    SyntheticSegmentationDataset,
+    VisionDatasetConfig,
     create_synthetic_image_dataset,
-    create_synthetic_segmentation_dataset
+    create_synthetic_segmentation_dataset,
 )
 from ..utils.seed import worker_init_fn
 
@@ -25,7 +23,7 @@ class VisionDataModule(LightningDataModule):
     """
     Lightning DataModule for vision tasks (classification, segmentation)
     """
-    
+
     def __init__(
         self,
         task: str = "classification",
@@ -39,7 +37,6 @@ class VisionDataModule(LightningDataModule):
         test_transforms: Optional[Callable] = None,
         split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
         image_size: Optional[list] = None,
-        **kwargs
     ):
         super().__init__()
 
@@ -63,7 +60,8 @@ class VisionDataModule(LightningDataModule):
         self.val_transforms = val_transforms or self._get_default_val_transforms()
         self.test_transforms = test_transforms or self._get_default_test_transforms()
 
-        # Datasets
+        # Datasets (generated in setup(); nothing to download)
+        self.datasets = None
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
@@ -71,70 +69,68 @@ class VisionDataModule(LightningDataModule):
         # Data info
         self.dims = None
         self.num_classes = self.data_config.num_classes
-        
+
     def _get_default_train_transforms(self) -> transforms.Compose:
         """Get default training transforms"""
         if self.task == "classification":
-            return transforms.Compose([
-                transforms.ToPILImage() if not hasattr(transforms, 'ToTensor') else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomRotation(degrees=15),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
+            return transforms.Compose(
+                [
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(degrees=15),
+                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ]
+            )
         else:  # segmentation
-            return transforms.Compose([
-                transforms.ToPILImage() if not hasattr(transforms, 'ToTensor') else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomRotation(degrees=10),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-    
+            return transforms.Compose(
+                [
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(degrees=10),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ]
+            )
+
     def _get_default_val_transforms(self) -> transforms.Compose:
         """Get default validation transforms"""
-        return transforms.Compose([
-            transforms.ToPILImage() if not hasattr(transforms, 'ToTensor') else transforms.Lambda(lambda x: x),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-    
+        return transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+        )
+
     def _get_default_test_transforms(self) -> transforms.Compose:
         """Get default test transforms"""
         return self._get_default_val_transforms()
-    
+
     def prepare_data(self) -> None:
-        """Download and prepare data (called once per node)"""
-        # Generate synthetic data if needed
+        """Nothing to download: synthetic data is generated in-memory in setup()"""
+
+    def _build_datasets(self) -> None:
+        """Generate the synthetic datasets for every split"""
         if self.task == "classification":
             self.datasets = create_synthetic_image_dataset(
-                self.data_config,
-                splits=["train", "val", "test"],
-                split_ratios=self.split_ratios
+                self.data_config, splits=["train", "val", "test"], split_ratios=self.split_ratios
             )
         elif self.task == "segmentation":
             self.datasets = create_synthetic_segmentation_dataset(
-                self.data_config,
-                splits=["train", "val", "test"],
-                split_ratios=self.split_ratios
+                self.data_config, splits=["train", "val", "test"], split_ratios=self.split_ratios
             )
         else:
             raise ValueError(f"Unknown task: {self.task}")
-    
+
     def setup(self, stage: Optional[str] = None) -> None:
-        """Setup datasets for each stage"""
-        if not hasattr(self, 'datasets'):
-            self.prepare_data()
-        
+        """Setup datasets for each stage (runs on every process)"""
+        if self.datasets is None:
+            self._build_datasets()
+
         if stage == "fit" or stage is None:
             self.train_dataset = self.datasets["train"]
             self.val_dataset = self.datasets["val"]
-            
+
             # Set transforms
             self.train_dataset.transform = self.train_transforms
             self.val_dataset.transform = self.val_transforms
-            
+
             # Calculate dimensions
             sample_input, _ = self.train_dataset[0]
             if isinstance(sample_input, torch.Tensor):
@@ -142,17 +138,17 @@ class VisionDataModule(LightningDataModule):
             else:
                 # If transforms haven't been applied yet
                 self.dims = (self.data_config.num_channels,) + self.data_config.image_size
-        
+
         if stage == "test" or stage is None:
             self.test_dataset = self.datasets["test"]
             self.test_dataset.transform = self.test_transforms
-        
+
         if stage == "predict" or stage is None:
             # Use test dataset for prediction
-            if not hasattr(self, 'test_dataset') or self.test_dataset is None:
+            if not hasattr(self, "test_dataset") or self.test_dataset is None:
                 self.test_dataset = self.datasets["test"]
                 self.test_dataset.transform = self.test_transforms
-    
+
     def train_dataloader(self) -> DataLoader:
         """Create training dataloader"""
         return DataLoader(
@@ -165,7 +161,7 @@ class VisionDataModule(LightningDataModule):
             worker_init_fn=worker_init_fn,
             drop_last=True,
         )
-    
+
     def val_dataloader(self) -> DataLoader:
         """Create validation dataloader"""
         return DataLoader(
@@ -177,7 +173,7 @@ class VisionDataModule(LightningDataModule):
             persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
-    
+
     def test_dataloader(self) -> DataLoader:
         """Create test dataloader"""
         return DataLoader(
@@ -189,11 +185,11 @@ class VisionDataModule(LightningDataModule):
             persistent_workers=self.persistent_workers and self.num_workers > 0,
             worker_init_fn=worker_init_fn,
         )
-    
+
     def predict_dataloader(self) -> DataLoader:
         """Create prediction dataloader"""
         return self.test_dataloader()
-    
+
     def get_class_names(self) -> list:
         """Get class names for the dataset"""
         if self.task == "classification":
@@ -202,7 +198,7 @@ class VisionDataModule(LightningDataModule):
             return ["background"] + [f"object_{i}" for i in range(1, self.num_classes)]
         else:
             return []
-    
+
     def get_dataset_info(self) -> Dict[str, Any]:
         """Get information about the dataset"""
         return {
@@ -215,60 +211,60 @@ class VisionDataModule(LightningDataModule):
             "batch_size": self.batch_size,
             "num_workers": self.num_workers,
         }
-    
+
     def visualize_batch(self, stage: str = "train", num_samples: int = 8) -> None:
         """Visualize a batch of data"""
         import matplotlib.pyplot as plt
-        
+
         if stage == "train":
             dataloader = self.train_dataloader()
         elif stage == "val":
             dataloader = self.val_dataloader()
         else:
             dataloader = self.test_dataloader()
-        
+
         batch = next(iter(dataloader))
         images, targets = batch
-        
+
         # Denormalize images for visualization
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
         std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-        
+
         fig, axes = plt.subplots(2, num_samples // 2, figsize=(15, 6))
         axes = axes.flatten()
-        
+
         for i in range(min(num_samples, len(images))):
             # Denormalize
             img = images[i] * std + mean
             img = torch.clamp(img, 0, 1)
-            
+
             # Convert to numpy and transpose
             if img.shape[0] == 3:  # RGB
                 img_np = img.permute(1, 2, 0).numpy()
             else:  # Grayscale
                 img_np = img.squeeze().numpy()
-            
-            axes[i].imshow(img_np, cmap='gray' if len(img_np.shape) == 2 else None)
-            
+
+            axes[i].imshow(img_np, cmap="gray" if len(img_np.shape) == 2 else None)
+
             if self.task == "classification":
-                axes[i].set_title(f'Class: {targets[i].item()}')
+                axes[i].set_title(f"Class: {targets[i].item()}")
             elif self.task == "segmentation":
-                axes[i].set_title(f'Segmentation')
+                axes[i].set_title("Segmentation")
                 # Could overlay mask here
-            
-            axes[i].axis('off')
-        
+
+            axes[i].axis("off")
+
         plt.tight_layout()
         plt.show()
-    
+
     def compute_class_weights(self) -> torch.Tensor:
         """Compute class weights for imbalanced datasets"""
         if self.task != "classification" or self.train_dataset is None:
             return torch.ones(self.num_classes)
-        
+
         # Count class frequencies
         class_counts = torch.zeros(self.num_classes)
-        
+
         for _, target in self.train_dataset:
             if isinstance(target, torch.Tensor):
                 if target.dim() == 0:  # Single class
@@ -278,13 +274,13 @@ class VisionDataModule(LightningDataModule):
                         class_counts += target
                     else:
                         class_counts[target.argmax().item()] += 1
-        
+
         # Compute inverse frequency weights
         total_samples = class_counts.sum()
         class_weights = total_samples / (self.num_classes * class_counts + 1e-8)
-        
+
         return class_weights
-    
+
     def __repr__(self) -> str:
         """String representation"""
         info = self.get_dataset_info()
@@ -303,40 +299,18 @@ class VisionDataModule(LightningDataModule):
 
 # Convenience functions for common vision tasks
 def get_classification_datamodule(
-    num_classes: int = 10,
-    image_size: Tuple[int, int] = (64, 64),
-    batch_size: int = 32,
-    **kwargs
+    num_classes: int = 10, image_size: Tuple[int, int] = (64, 64), batch_size: int = 32, **kwargs
 ) -> VisionDataModule:
     """Get a vision datamodule for classification"""
-    config = VisionDatasetConfig(
-        num_classes=num_classes,
-        image_size=image_size,
-        **kwargs
-    )
-    
-    return VisionDataModule(
-        task="classification",
-        data_config=config,
-        batch_size=batch_size
-    )
+    config = VisionDatasetConfig(num_classes=num_classes, image_size=image_size, **kwargs)
+
+    return VisionDataModule(task="classification", data_config=config, batch_size=batch_size)
 
 
 def get_segmentation_datamodule(
-    num_classes: int = 4,
-    image_size: Tuple[int, int] = (64, 64),
-    batch_size: int = 16,
-    **kwargs
+    num_classes: int = 4, image_size: Tuple[int, int] = (64, 64), batch_size: int = 16, **kwargs
 ) -> VisionDataModule:
     """Get a vision datamodule for segmentation"""
-    config = VisionDatasetConfig(
-        num_classes=num_classes,
-        image_size=image_size,
-        **kwargs
-    )
-    
-    return VisionDataModule(
-        task="segmentation",
-        data_config=config,
-        batch_size=batch_size
-    )
+    config = VisionDatasetConfig(num_classes=num_classes, image_size=image_size, **kwargs)
+
+    return VisionDataModule(task="segmentation", data_config=config, batch_size=batch_size)

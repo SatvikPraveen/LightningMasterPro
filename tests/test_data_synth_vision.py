@@ -1,18 +1,13 @@
 # tests/test_data_synth_vision.py
 """Tests for synthetic vision data generation."""
 
-import sys
-from pathlib import Path
 import pytest
 import torch
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from lmpro.data.synth_vision import (
-    VisionDatasetConfig,
     SyntheticImageDataset,
     SyntheticSegmentationDataset,
+    VisionDatasetConfig,
     create_synthetic_image_dataset,
     create_synthetic_segmentation_dataset,
 )
@@ -41,6 +36,7 @@ def seg_dataset():
 
 # ─── VisionDatasetConfig ─────────────────────────────────────────────────────
 
+
 class TestVisionDatasetConfig:
     def test_defaults(self):
         cfg = VisionDatasetConfig()
@@ -56,6 +52,7 @@ class TestVisionDatasetConfig:
 
 
 # ─── SyntheticImageDataset ───────────────────────────────────────────────────
+
 
 class TestSyntheticImageDataset:
     def test_len(self, image_dataset, small_config):
@@ -84,6 +81,23 @@ class TestSyntheticImageDataset:
         # Different splits should generally produce different data
         assert not torch.allclose(img_train, img_val)
 
+    def test_val_and_test_splits_differ(self, small_config):
+        val = SyntheticImageDataset(config=small_config, split="val")
+        test = SyntheticImageDataset(config=small_config, split="test")
+        assert not torch.equal(val.images, test.images)
+
+    def test_python_random_is_seeded(self, small_config):
+        """Shape placement uses `random`; two builds of a split must be identical
+        regardless of the global random state in between."""
+        import random
+
+        a = SyntheticImageDataset(config=small_config, split="train")
+        random.seed(12345)
+        random.random()
+        b = SyntheticImageDataset(config=small_config, split="train")
+        assert torch.equal(a.images, b.images)
+        assert torch.equal(a.labels, b.labels)
+
     def test_transform_applied(self, small_config):
         called = {"n": 0}
 
@@ -106,6 +120,7 @@ class TestSyntheticImageDataset:
 
 
 # ─── SyntheticSegmentationDataset ───────────────────────────────────────────
+
 
 class TestSyntheticSegmentationDataset:
     def test_len(self, seg_dataset):
@@ -131,8 +146,26 @@ class TestSyntheticSegmentationDataset:
             assert mask.min() >= 0
             assert mask.max() < seg_dataset.config.num_classes  # labels 0..num_classes-1
 
+    def test_val_and_test_splits_differ(self):
+        cfg = VisionDatasetConfig(num_samples=10, image_size=(16, 16), num_classes=3)
+        val = SyntheticSegmentationDataset(config=cfg, split="val")
+        test = SyntheticSegmentationDataset(config=cfg, split="test")
+        assert not torch.equal(val.images, test.images)
+        assert not torch.equal(val.masks, test.masks)
+
+    def test_python_random_is_seeded(self):
+        import random
+
+        cfg = VisionDatasetConfig(num_samples=10, image_size=(16, 16), num_classes=3)
+        a = SyntheticSegmentationDataset(config=cfg, split="val")
+        random.seed(777)
+        random.random()
+        b = SyntheticSegmentationDataset(config=cfg, split="val")
+        assert torch.equal(a.masks, b.masks)
+
 
 # ─── Factory Functions ───────────────────────────────────────────────────────
+
 
 class TestCreateSyntheticImageDataset:
     def test_creates_dataset(self):

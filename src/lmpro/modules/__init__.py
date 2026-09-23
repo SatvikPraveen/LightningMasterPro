@@ -4,10 +4,6 @@
 Lightning Modules for different domains and tasks
 """
 
-# Vision modules
-from .vision.classifier import VisionClassifier
-from .vision.segmenter import VisionSegmenter
-
 # NLP modules
 from .nlp.char_lm import CharacterLanguageModel
 from .nlp.sentiment import SentimentClassifier
@@ -18,18 +14,19 @@ from .tabular.mlp_reg_cls import MLPRegressorClassifier
 # Time series modules
 from .timeseries.forecaster import TimeSeriesForecaster
 
+# Vision modules
+from .vision.classifier import VisionClassifier
+from .vision.segmenter import VisionSegmenter
+
 __all__ = [
     # Vision
     "VisionClassifier",
     "VisionSegmenter",
-    
     # NLP
-    "CharacterLanguageModel", 
+    "CharacterLanguageModel",
     "SentimentClassifier",
-    
     # Tabular
     "MLPRegressorClassifier",
-    
     # Time Series
     "TimeSeriesForecaster",
 ]

@@ -1,21 +1,16 @@
 # tests/test_data_synth_tabular.py
 """Tests for synthetic tabular data generation."""
 
-import sys
-from pathlib import Path
 import pytest
 import torch
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from lmpro.data.synth_tabular import (
-    TabularDatasetConfig,
-    SyntheticTabularDataset,
     ComplexTabularDataset,
-    create_synthetic_tabular_dataset,
-    create_synthetic_regression_dataset,
+    SyntheticTabularDataset,
+    TabularDatasetConfig,
     create_synthetic_classification_dataset,
+    create_synthetic_regression_dataset,
+    create_synthetic_tabular_dataset,
 )
 
 
@@ -41,6 +36,7 @@ def reg_dataset(small_config):
 
 # ─── TabularDatasetConfig ────────────────────────────────────────────────────
 
+
 class TestTabularDatasetConfig:
     def test_defaults(self):
         cfg = TabularDatasetConfig()
@@ -55,6 +51,7 @@ class TestTabularDatasetConfig:
 
 
 # ─── SyntheticTabularDataset ─────────────────────────────────────────────────
+
 
 class TestSyntheticTabularDataset:
     def test_len_classification(self, clf_dataset, small_config):
@@ -101,8 +98,23 @@ class TestSyntheticTabularDataset:
         with pytest.raises((ValueError, KeyError)):
             SyntheticTabularDataset(config=small_config, task="unsupported")
 
+    @pytest.mark.parametrize("task", ["classification", "regression"])
+    def test_val_and_test_splits_differ(self, small_config, task):
+        train = SyntheticTabularDataset(config=small_config, task=task, split="train", normalize=False)
+        val = SyntheticTabularDataset(config=small_config, task=task, split="val", normalize=False)
+        test = SyntheticTabularDataset(config=small_config, task=task, split="test", normalize=False)
+        assert not torch.equal(val.X_tensor, test.X_tensor)
+        assert not torch.equal(train.X_tensor, val.X_tensor)
+        assert not torch.equal(train.X_tensor, test.X_tensor)
+
+    def test_same_split_is_deterministic(self, small_config):
+        a = SyntheticTabularDataset(config=small_config, split="val")
+        b = SyntheticTabularDataset(config=small_config, split="val")
+        assert torch.equal(a.X_tensor, b.X_tensor)
+
 
 # ─── All Classes Present ─────────────────────────────────────────────────────
+
 
 class TestClassBalance:
     def test_all_classes_in_classification(self):
@@ -114,6 +126,7 @@ class TestClassBalance:
 
 # ─── Factory Functions ───────────────────────────────────────────────────────
 
+
 class TestCreateSyntheticTabularDataset:
     def test_creates_dataset(self):
         cfg = TabularDatasetConfig(num_samples=20, num_features=20, num_classes=3)
@@ -121,6 +134,17 @@ class TestCreateSyntheticTabularDataset:
         assert isinstance(result, dict)
         assert "train" in result
         assert isinstance(result["train"], SyntheticTabularDataset)
+
+    @pytest.mark.parametrize("dataset_type", ["simple", "complex", "time_varying"])
+    def test_val_and_test_splits_differ(self, dataset_type):
+        cfg = TabularDatasetConfig(num_samples=100, num_features=8, num_informative=5, num_classes=3)
+        result = create_synthetic_tabular_dataset(config=cfg, dataset_type=dataset_type)
+        val, test = result["val"], result["test"]
+        if dataset_type == "complex":
+            assert isinstance(val, ComplexTabularDataset)
+        x_val = val[0][0] if dataset_type == "time_varying" else val.X_tensor
+        x_test = test[0][0] if dataset_type == "time_varying" else test.X_tensor
+        assert not torch.equal(x_val, x_test)
 
 
 class TestCreateSyntheticRegressionDataset:
@@ -141,3 +165,32 @@ class TestCreateSyntheticClassificationDataset:
         assert "train" in result
         _, y = result["train"][0]
         assert y.dtype == torch.long
+
+
+class TestSplitsShareGeneratingFunction:
+    """Val/test must come from the same problem as train (sklearn's make_* draw a new one per seed)."""
+
+    def test_regression_val_is_predictable_from_train(self):
+        from sklearn.linear_model import LinearRegression
+
+        from lmpro.data.synth_tabular import SyntheticTabularDataset, TabularDatasetConfig
+
+        cfg = TabularDatasetConfig(num_samples=300, num_features=20)
+        train, val = (
+            SyntheticTabularDataset(cfg, task="regression", split=s, normalize=False) for s in ("train", "val")
+        )
+        model = LinearRegression().fit(train.X, train.y)
+        assert model.score(val.X, val.y) > 0.9
+        assert abs(train.y.std() - 1.0) < 0.1  # unit-scale targets
+
+    def test_classification_val_is_predictable_from_train(self):
+        from sklearn.linear_model import LogisticRegression
+
+        from lmpro.data.synth_tabular import SyntheticTabularDataset, TabularDatasetConfig
+
+        cfg = TabularDatasetConfig(num_samples=300, num_features=20, num_classes=3)
+        train, val = (
+            SyntheticTabularDataset(cfg, task="classification", split=s, normalize=False) for s in ("train", "val")
+        )
+        model = LogisticRegression(max_iter=2000).fit(train.X, train.y)
+        assert model.score(val.X, val.y) > 1.5 / cfg.num_classes  # clearly above chance

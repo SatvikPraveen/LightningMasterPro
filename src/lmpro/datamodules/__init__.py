@@ -4,14 +4,14 @@
 LightningDataModules for different domains
 """
 
-from .vision_dm import VisionDataModule
 from .nlp_dm import NLPDataModule
 from .tabular_dm import TabularDataModule
 from .ts_dm import TimeSeriesDataModule
+from .vision_dm import VisionDataModule
 
 __all__ = [
     "VisionDataModule",
-    "NLPDataModule", 
+    "NLPDataModule",
     "TabularDataModule",
     "TimeSeriesDataModule",
 ]

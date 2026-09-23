@@ -1,21 +1,16 @@
 # tests/test_data_synth_timeseries.py
 """Tests for synthetic time series data generation."""
 
-import sys
-from pathlib import Path
 import pytest
 import torch
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from lmpro.data.synth_timeseries import (
-    TimeSeriesDatasetConfig,
-    SyntheticTimeSeriesDataset,
-    MultiVariateTimeSeriesDataset,
     AnomalyTimeSeriesDataset,
-    create_synthetic_timeseries_dataset,
+    MultiVariateTimeSeriesDataset,
+    SyntheticTimeSeriesDataset,
+    TimeSeriesDatasetConfig,
     create_synthetic_forecasting_dataset,
+    create_synthetic_timeseries_dataset,
 )
 
 
@@ -52,6 +47,7 @@ def multivariate_dataset(mv_config):
 
 # ─── TimeSeriesDatasetConfig ─────────────────────────────────────────────────
 
+
 class TestTimeSeriesDatasetConfig:
     def test_defaults(self):
         cfg = TimeSeriesDatasetConfig()
@@ -72,6 +68,7 @@ class TestTimeSeriesDatasetConfig:
 
 
 # ─── SyntheticTimeSeriesDataset ──────────────────────────────────────────────
+
 
 class TestSyntheticTimeSeriesDataset:
     def test_len(self, ts_dataset, small_config):
@@ -109,8 +106,15 @@ class TestSyntheticTimeSeriesDataset:
         assert x.dtype == torch.float32
         assert y.dtype == torch.float32
 
+    def test_val_and_test_differ(self, small_config):
+        val = SyntheticTimeSeriesDataset(config=small_config, split="val")
+        test = SyntheticTimeSeriesDataset(config=small_config, split="test")
+        assert not torch.allclose(val[0][0], test[0][0])
+        assert not torch.equal(val.sequences_tensor, test.sequences_tensor)
+
 
 # ─── MultiVariateTimeSeriesDataset ───────────────────────────────────────────
+
 
 class TestMultiVariateTimeSeriesDataset:
     def test_len(self, multivariate_dataset, mv_config):
@@ -126,8 +130,14 @@ class TestMultiVariateTimeSeriesDataset:
             assert not torch.isnan(x).any()
             assert not torch.isnan(y).any()
 
+    def test_val_and_test_differ(self, mv_config):
+        val = MultiVariateTimeSeriesDataset(config=mv_config, split="val")
+        test = MultiVariateTimeSeriesDataset(config=mv_config, split="test")
+        assert not torch.equal(val.sequences_tensor, test.sequences_tensor)
+
 
 # ─── AnomalyTimeSeriesDataset ────────────────────────────────────────────────
+
 
 class TestAnomalyTimeSeriesDataset:
     def test_creates_dataset(self):
@@ -145,15 +155,21 @@ class TestAnomalyTimeSeriesDataset:
         else:
             assert label in (0, 1)
 
+    def test_val_and_test_differ(self):
+        cfg = TimeSeriesDatasetConfig(num_samples=30, sequence_length=15)
+        val = AnomalyTimeSeriesDataset(config=cfg, split="val")
+        test = AnomalyTimeSeriesDataset(config=cfg, split="test")
+        assert not torch.equal(val.sequences_tensor, test.sequences_tensor)
+
     def test_anomaly_fraction_nonzero(self):
         cfg = TimeSeriesDatasetConfig(num_samples=100, sequence_length=15)
         ds = AnomalyTimeSeriesDataset(config=cfg)
-        labels = [ds[i][1].item() if isinstance(ds[i][1], torch.Tensor) else ds[i][1]
-                  for i in range(len(ds))]
+        labels = [ds[i][1].item() if isinstance(ds[i][1], torch.Tensor) else ds[i][1] for i in range(len(ds))]
         assert sum(labels) > 0, "Expected some anomalies in the dataset"
 
 
 # ─── Factory Functions ───────────────────────────────────────────────────────
+
 
 class TestCreateSyntheticTimeseriesDataset:
     def test_creates_dataset(self):
@@ -162,6 +178,12 @@ class TestCreateSyntheticTimeseriesDataset:
         assert isinstance(result, dict)
         assert "train" in result
         assert isinstance(result["train"], SyntheticTimeSeriesDataset)
+
+    @pytest.mark.parametrize("dataset_type", ["univariate", "multivariate", "anomaly"])
+    def test_val_and_test_splits_differ(self, dataset_type):
+        cfg = TimeSeriesDatasetConfig(num_samples=60, sequence_length=15, prediction_horizon=3, num_features=2)
+        result = create_synthetic_timeseries_dataset(config=cfg, dataset_type=dataset_type)
+        assert not torch.equal(result["val"].sequences_tensor, result["test"].sequences_tensor)
 
 
 class TestCreateSyntheticForecastingDataset:

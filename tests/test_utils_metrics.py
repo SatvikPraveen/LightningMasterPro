@@ -1,24 +1,19 @@
 # tests/test_utils_metrics.py
 """Tests for metrics utilities."""
 
-import sys
-from pathlib import Path
 import pytest
 import torch
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from lmpro.utils.metrics import (
-    get_metrics_dict,
+    compute_calibration_metrics,
     compute_classification_metrics,
     compute_regression_metrics,
-    compute_calibration_metrics,
+    get_metrics_dict,
     print_metrics_report,
 )
 
-
 # ─── get_metrics_dict ───────────────────────────────────────────────────────
+
 
 class TestGetMetricsDict:
     def test_binary_task(self):
@@ -51,11 +46,13 @@ class TestGetMetricsDict:
     def test_returns_torchmetrics_objects(self):
         metrics = get_metrics_dict(task="binary", num_classes=2)
         from torchmetrics import Metric
+
         for v in metrics.values():
             assert isinstance(v, Metric)
 
 
 # ─── compute_classification_metrics ────────────────────────────────────────
+
 
 class TestClassificationMetrics:
     @pytest.fixture
@@ -92,7 +89,32 @@ class TestClassificationMetrics:
         names = [f"class_{i}" for i in range(n_cls)]
         results = compute_classification_metrics(logits, targets, num_classes=n_cls, class_names=names)
         assert "per_class_report" in results
-        assert f"class_0_accuracy" in results["per_class_report"]
+        assert "class_0_accuracy" in results["per_class_report"]
+
+    def test_binary_auroc_from_two_column_logits(self, binary_data):
+        """Binary task with (N, 2) logits must produce AUROC / AP (positive-class probs)."""
+        logits, targets = binary_data
+        results = compute_classification_metrics(logits, targets, num_classes=2)
+        assert "auroc_macro" in results
+        assert "avg_precision_macro" in results
+        assert 0.0 <= results["auroc_macro"] <= 1.0
+        assert len(results["f1_per_class"]) == 2
+
+    def test_binary_from_single_logit(self):
+        torch.manual_seed(0)
+        targets = torch.randint(0, 2, (50,))
+        logits = torch.randn(50, 1)
+        results = compute_classification_metrics(logits, targets, num_classes=2)
+        assert "auroc_macro" in results
+        assert 0.0 <= results["accuracy"] <= 1.0
+
+    def test_binary_perfect_auroc(self):
+        targets = torch.tensor([0, 0, 1, 1, 0, 1])
+        logits = torch.zeros(6, 2)
+        logits[torch.arange(6), targets] = 5.0
+        results = compute_classification_metrics(logits, targets, num_classes=2)
+        assert results["auroc_macro"] == pytest.approx(1.0, abs=1e-6)
+        assert results["accuracy"] == pytest.approx(1.0, abs=1e-6)
 
     def test_without_per_class(self, binary_data):
         logits, targets = binary_data
@@ -110,6 +132,7 @@ class TestClassificationMetrics:
 
 
 # ─── compute_regression_metrics ─────────────────────────────────────────────
+
 
 class TestRegressionMetrics:
     @pytest.fixture
@@ -165,6 +188,7 @@ class TestRegressionMetrics:
 
 # ─── compute_calibration_metrics ────────────────────────────────────────────
 
+
 class TestCalibrationMetrics:
     @pytest.fixture
     def calibration_data(self):
@@ -212,6 +236,7 @@ class TestCalibrationMetrics:
 
 
 # ─── print_metrics_report ──────────────────────────────────────────────────
+
 
 class TestPrintMetricsReport:
     def test_runs_without_error(self, capsys):
