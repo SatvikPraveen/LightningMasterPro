@@ -1,303 +1,110 @@
-# File Location: notebooks/README.md
-
 # PyTorch Lightning Notebooks - Learning Path Guide
 
-This directory contains a comprehensive collection of PyTorch Lightning notebooks designed to take you from beginner to advanced practitioner. Each notebook builds upon previous concepts while introducing new techniques and best practices.
+Twenty notebooks that take you from Lightning fundamentals to a capstone ablation study. All notebooks target **Lightning 2.x** (`import lightning.pytorch as pl`) and are written to run end-to-end on a CPU-only laptop; GPU-specific features are guarded or demonstrated with scripts.
 
-## 📚 Learning Path Structure
+## Notebook Index
 
-### 🎯 Advanced Mechanics (06_advanced_mechanics/)
+### 01 - Lightning Fundamentals (`01_lightning_fundamentals/`)
 
-Deep dive into PyTorch Lightning's internal mechanisms and advanced training strategies.
+| Notebook | Topics |
+| --- | --- |
+| [01_pl_architecture.ipynb](./01_lightning_fundamentals/01_pl_architecture.ipynb) | `LightningModule`, `Trainer`, the training/validation step contract, Lightning vs plain PyTorch |
+| [02_trainer_sanity_and_debug.ipynb](./01_lightning_fundamentals/02_trainer_sanity_and_debug.ipynb) | `fast_dev_run`, `overfit_batches`, `limit_*_batches`, gradient-norm logging via a callback, `detect_anomaly`, profilers |
+| [03_lightningcli_config_runs.ipynb](./01_lightning_fundamentals/03_lightningcli_config_runs.ipynb) | `LightningCLI`, YAML configs, config-driven experiments |
 
-#### [12_ddp_single_node_walkthrough.ipynb](./12_ddp_single_node_walkthrough.ipynb)
+### 02 - DataModules and Metrics (`02_datamodules_and_metrics/`)
 
-**Distributed Data Parallel (DDP) Single Node Training**
+| Notebook | Topics |
+| --- | --- |
+| [04_building_datamodules.ipynb](./02_datamodules_and_metrics/04_building_datamodules.ipynb) | `LightningDataModule`, `prepare_data` vs `setup`, splits, transforms, DataLoader tuning |
+| [05_torchmetrics_logging.ipynb](./02_datamodules_and_metrics/05_torchmetrics_logging.ipynb) | TorchMetrics, `MetricCollection`, `self.log` semantics, loggers |
 
-- Implement multi-GPU training with PyTorch Lightning
-- Handle data loading and synchronization for distributed training
-- Monitor and optimize DDP performance
-- Compare single GPU vs multi-GPU training efficiency
-- **Key Concepts**: Process groups, gradient synchronization, NCCL backend
-- **Prerequisites**: Basic PyTorch Lightning knowledge
-- **Duration**: 45-60 minutes
+### 03 - Callbacks and Checkpointing (`03_callbacks_and_checkpointing/`)
 
-#### [13_manual_optimization_gan.ipynb](./06_advanced_mechanics/13_manual_optimization_gan.ipynb)
+| Notebook | Topics |
+| --- | --- |
+| [06_checkpoint_earlystop.ipynb](./03_callbacks_and_checkpointing/06_checkpoint_earlystop.ipynb) | `ModelCheckpoint`, `EarlyStopping`, resuming, checkpoint contents |
+| [07_custom_callbacks_swa_ema.ipynb](./03_callbacks_and_checkpointing/07_custom_callbacks_swa_ema.ipynb) | Writing callbacks, hook order, Stochastic Weight Averaging, EMA weights |
 
-**Manual Optimization with GAN Implementation**
+### 04 - Performance and Scaling (`04_performance_and_scaling/`)
 
-- Master manual optimization techniques in PyTorch Lightning
-- Build and train Generative Adversarial Networks
-- Handle multi-optimizer setups and custom backward passes
-- Implement gradient penalties and advanced training strategies
-- **Key Concepts**: `manual_backward()`, optimizer toggling, GAN training dynamics
-- **Prerequisites**: Understanding of GANs and optimization
-- **Duration**: 60-75 minutes
+| Notebook | Topics |
+| --- | --- |
+| [08_mixed_precision_amp.ipynb](./04_performance_and_scaling/08_mixed_precision_amp.ipynb) | `precision="16-mixed"` / `"bf16-mixed"`, memory and speed benchmarking callbacks (CPU falls back to bf16) |
+| [09_grad_accum_clip_compile.ipynb](./04_performance_and_scaling/09_grad_accum_clip_compile.ipynb) | Gradient accumulation, gradient clipping, `torch.compile` |
+| [10_profiler_and_perf_tuning.ipynb](./04_performance_and_scaling/10_profiler_and_perf_tuning.ipynb) | Simple / PyTorch profilers, finding bottlenecks, DataLoader tuning |
 
-#### [14_custom_loops_kfold.ipynb](./06_advanced_mechanics/14_custom_loops_kfold.ipynb)
+### 05 - Strategies and DDP (`05_strategies_and_ddp/`)
 
-**Custom Loops and K-Fold Cross Validation**
+| Notebook | Topics |
+| --- | --- |
+| [11_devices_precision_strategies.ipynb](./05_strategies_and_ddp/11_devices_precision_strategies.ipynb) | Accelerators, devices, precision and strategy flags, production configurations |
+| [12_ddp_single_node_walkthrough.ipynb](./05_strategies_and_ddp/12_ddp_single_node_walkthrough.ipynb) | DDP concepts, `DDPStrategy` (NCCL vs Gloo), a generated `train_ddp.py` launched with `python` / `torchrun`, `ddp_notebook` vs `ddp_spawn` |
 
-- Understand PyTorch Lightning's loop architecture
-- Implement custom training loops and FitLoop wrappers
-- Build comprehensive K-Fold cross validation systems
-- Perform statistical analysis of model performance
-- **Key Concepts**: Loop hierarchy, custom loop creation, cross-validation
-- **Prerequisites**: Statistical understanding of cross-validation
-- **Duration**: 75-90 minutes
+### 06 - Advanced Mechanics (`06_advanced_mechanics/`)
 
-#### [15_curriculum_batchloop.ipynb](./06_advanced_mechanics/15_curriculum_batchloop.ipynb)
+Lightning 2.0 **removed the public Loop API** (`pytorch_lightning.loops.base.Loop`, `FitLoop` / `TrainingEpochLoop` / `EvaluationLoop` subclassing, `*_epoch_end(outputs)` hooks). These notebooks use the 2.x-idiomatic replacements: composing Trainers in plain Python, `on_*_epoch_end` hooks with manually accumulated outputs, and Callbacks.
 
-**Curriculum Learning with Custom Batch Loops**
+| Notebook | Topics |
+| --- | --- |
+| [13_manual_optimization_gan.ipynb](./06_advanced_mechanics/13_manual_optimization_gan.ipynb) | `automatic_optimization=False`, multiple optimizers, `manual_backward`, GAN training, `on_train_epoch_end` |
+| [14_custom_loops_kfold.ipynb](./06_advanced_mechanics/14_custom_loops_kfold.ipynb) | K-Fold cross validation with a fresh `Trainer` per fold, `on_validation_epoch_end`, model selection |
+| [15_curriculum_batchloop.ipynb](./06_advanced_mechanics/15_curriculum_batchloop.ipynb) | Curriculum learning driven by a `Callback` + `reload_dataloaders_every_n_epochs=1`, pacing functions |
 
-- Implement curriculum learning strategies
-- Create custom batch loops for progressive training difficulty
-- Build adaptive learning schedules based on model performance
-- Analyze curriculum effectiveness and learning dynamics
-- **Key Concepts**: Progressive difficulty, adaptive sampling, custom batch loops
-- **Prerequisites**: Understanding of training dynamics
-- **Duration**: 60-75 minutes
+### 07 - Evaluation, Export and Prediction (`07_evaluation_export_predict/`)
 
-### 🔍 Evaluation, Export & Prediction (07_evaluation_export_predict/)
+| Notebook | Topics |
+| --- | --- |
+| [16_test_predict_loops.ipynb](./07_evaluation_export_predict/16_test_predict_loops.ipynb) | `trainer.test` / `trainer.predict`, `test_step` / `predict_step`, result-collecting callbacks, `BasePredictionWriter`, MC-dropout uncertainty |
+| [17_onnx_torchscript_export.ipynb](./07_evaluation_export_predict/17_onnx_torchscript_export.ipynb) | ONNX and TorchScript export, validation of exported models, inference benchmarking |
 
-Advanced model evaluation, export strategies, and production deployment techniques.
+### 08 - Projects and Capstone (`08_projects_and_capstone/`)
 
-#### [16_test_predict_loops.ipynb](./07_evaluation_export_predict/16_test_predict_loops.ipynb)
+| Notebook | Topics |
+| --- | --- |
+| [18_mini_vision_project.ipynb](./08_projects_and_capstone/18_mini_vision_project.ipynb) | Multi-task vision model (classifier + segmenter), SWA vs non-SWA comparison |
+| [19_mini_nlp_project.ipynb](./08_projects_and_capstone/19_mini_nlp_project.ipynb) | Character-level language model vs sentiment classifier |
+| [20_capstone_ablation_study.ipynb](./08_projects_and_capstone/20_capstone_ablation_study.ipynb) | Configurable model + DataModule, systematic ablation framework (`QUICK=True` runs 4 experiments x 2 epochs), production pipeline |
 
-**Test and Prediction Loops Implementation**
+## Recommended Learning Path
 
-- Build custom test and prediction loops
-- Handle batch prediction with proper memory management
-- Implement comprehensive model testing pipelines
-- Create production-ready inference systems
-- **Key Concepts**: Custom evaluation loops, batch processing, memory optimization
-- **Prerequisites**: Model evaluation fundamentals
-- **Duration**: 45-60 minutes
+1. **Fundamentals (01-05)** - module/trainer contract, debugging flags, configs, data and metrics
+2. **Training control (06-10)** - callbacks, checkpointing, precision, accumulation, profiling
+3. **Scaling (11-12)** - devices, strategies and a real DDP script
+4. **Advanced mechanics (13-15)** - manual optimization and 2.x replacements for custom loops
+5. **Evaluation and deployment (16-17)** - testing, prediction, export
+6. **Projects (18-20)** - end-to-end applications and the capstone ablation study
 
-#### [17_onnx_torchscript_export.ipynb](./07_evaluation_export_predict/17_onnx_torchscript_export.ipynb)
-
-**ONNX and TorchScript Export for Production**
-
-- Export PyTorch Lightning models to multiple formats
-- Optimize models for different deployment scenarios
-- Implement cross-platform compatibility testing
-- Benchmark performance across export formats
-- **Key Concepts**: Model serialization, ONNX export, TorchScript optimization
-- **Prerequisites**: Production deployment awareness
-- **Duration**: 60-75 minutes
-
-### 🚀 Projects and Capstone (08_projects_and_capstone/)
-
-Real-world projects combining multiple concepts and advanced techniques.
-
-#### [18_mini_vision_project.ipynb](./08_projects_and_capstone/18_mini_vision_project.ipynb)
-
-**Mini Vision Project: Classifier + Segmenter with SWA vs Non-SWA**
-
-- Build multi-task vision models for classification and segmentation
-- Compare Stochastic Weight Averaging (SWA) with standard training
-- Handle multi-task loss functions and complex architectures
-- Evaluate performance improvements from advanced optimization
-- **Key Concepts**: Multi-task learning, SWA optimization, computer vision
-- **Prerequisites**: CNN knowledge, multi-task learning concepts
-- **Duration**: 90-120 minutes
-
-#### [19_mini_nlp_project.ipynb](./08_projects_and_capstone/19_mini_nlp_project.ipynb)
-
-**Mini NLP Project: Character-Level Language Model vs Sentiment Analysis**
-
-- Implement character-level language models for text generation
-- Build sentiment analysis with modern NLP techniques
-- Compare generative vs discriminative NLP approaches
-- Handle text preprocessing and advanced tokenization
-- **Key Concepts**: Character-level processing, LSTM architectures, text generation
-- **Prerequisites**: NLP fundamentals, sequence modeling
-- **Duration**: 90-120 minutes
-
-## 🎓 Recommended Learning Path
-
-### For Advanced Practitioners
-
-If you're already comfortable with PyTorch Lightning basics:
-
-1. **Start with Advanced Mechanics** (Notebooks 12-15)
-
-   - Begin with DDP (12) for distributed training
-   - Progress to manual optimization (13) for fine control
-   - Master custom loops (14) for research flexibility
-   - Explore curriculum learning (15) for training efficiency
-
-2. **Master Evaluation and Deployment** (Notebooks 16-17)
-
-   - Implement production-ready evaluation (16)
-   - Learn model export strategies (17)
-
-3. **Apply Knowledge in Projects** (Notebooks 18-19)
-   - Vision project (18) for computer vision applications
-   - NLP project (19) for natural language processing
-
-### For Researchers and Practitioners
-
-- Focus on custom loops (14-15) for novel training strategies
-- Emphasize manual optimization (13) for research flexibility
-- Study both projects (18-19) for comprehensive understanding
-
-### For Production Engineers
-
-- Prioritize DDP training (12) for scalability
-- Master export strategies (17) for deployment
-- Focus on evaluation loops (16) for production systems
-
-## 📋 Prerequisites
-
-### General Requirements
-
-- Solid understanding of PyTorch fundamentals
-- Basic PyTorch Lightning knowledge (training loops, modules, data modules)
-- Python programming proficiency
-- Understanding of deep learning concepts
-
-### Specific Prerequisites by Section
-
-- **Advanced Mechanics**: Optimization theory, distributed computing basics
-- **Evaluation & Export**: Production deployment concepts, model serialization
-- **Projects**: Domain-specific knowledge (computer vision, NLP)
-
-## 🛠 Setup Instructions
-
-### Environment Setup
+## Setup
 
 ```bash
-# Create conda environment
-conda create -n pytorch-lightning-advanced python=3.9
-conda activate pytorch-lightning-advanced
-
-# Install core dependencies
-pip install torch torchvision torchaudio
-pip install pytorch-lightning
-pip install torchmetrics
-
-# For specific notebooks
-pip install onnx onnxruntime  # For ONNX export (notebook 17)
-pip install albumentations     # For vision project (notebook 18)
-pip install scikit-learn      # For evaluation metrics
-pip install matplotlib seaborn # For visualizations
+python -m venv .venv && source .venv/bin/activate
+pip install torch torchvision lightning torchmetrics
+pip install scikit-learn matplotlib seaborn pandas pyyaml   # analysis and plotting
+pip install onnx onnxruntime                                # notebook 17
+pip install tensorboard                                     # optional: TensorBoard logging / image logging
 ```
 
-### Hardware Recommendations
+Notebooks import Lightning as `import lightning.pytorch as pl`. The legacy `pytorch_lightning` package name still works with Lightning 2.x but is not used here.
 
-- **Notebooks 12-15**: GPU recommended (multi-GPU for notebook 12)
-- **Notebooks 16-17**: CPU sufficient, GPU optional
-- **Notebooks 18-19**: GPU recommended for faster training
+## Hardware Notes
 
-## 📊 Learning Outcomes
+- Every notebook runs on CPU; training lengths are deliberately short (`max_epochs`, `limit_train_batches`, `QUICK` flags) with comments on how to scale them up.
+- `precision="16-mixed"` needs a GPU; on CPU Lightning falls back to `"bf16-mixed"` with a warning (notebook 08).
+- Multi-process DDP (notebook 12) is demonstrated with a generated `train_ddp.py` script. The in-notebook multi-process run is behind a `RUN_DDP` flag (default `False`) because `ddp` / `ddp_spawn` are not supported inside Jupyter; `ddp_notebook` is the interactive alternative.
+- Notebooks 13-16 download MNIST into `./data` on first run.
 
-After completing this advanced series, you will be able to:
+## Troubleshooting
 
-### Technical Skills
+- **`ImportError: cannot import name 'Loop'`** - the public Loop API was removed in Lightning 2.0; see section 06 for the replacements.
+- **`TypeError: unexpected keyword 'track_grad_norm'`** - removed in 2.0; log gradient norms from a callback with `lightning.pytorch.utilities.grad_norm` (notebook 02).
+- **`precision=16` errors** - use the 2.x strings `"16-mixed"`, `"bf16-mixed"`, `"32-true"`.
+- **Image logging does nothing** - `add_image` needs a TensorBoard logger; without `tensorboard` installed Lightning uses `CSVLogger`.
+- **DataLoader worker errors inside Jupyter on macOS** - use `num_workers=0` (the notebooks' default) or move training into a script.
 
-- Implement distributed training across multiple GPUs
-- Create custom training loops for research applications
-- Build production-ready model evaluation and export pipelines
-- Apply advanced optimization techniques (SWA, curriculum learning)
-- Handle complex multi-task learning scenarios
+## Additional Resources
 
-### Practical Applications
-
-- Scale training to production environments
-- Deploy models across different platforms and frameworks
-- Implement research-grade training strategies
-- Build end-to-end machine learning systems
-- Optimize training efficiency and model performance
-
-### Research Capabilities
-
-- Design novel training procedures and optimization strategies
-- Implement custom evaluation metrics and analysis tools
-- Conduct rigorous experimental comparisons
-- Create reproducible and scalable research code
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Distributed Training (Notebook 12)**
-
-- Ensure NCCL is properly installed for GPU communication
-- Check GPU memory allocation for multi-GPU setups
-- Verify network configuration for multi-node setups
-
-**Custom Loops (Notebooks 14-15)**
-
-- Pay attention to loop state management and reset procedures
-- Ensure proper data flow between custom loop components
-- Validate loop integration with Lightning's trainer
-
-**Model Export (Notebook 17)**
-
-- Install ONNX and ONNX Runtime for export functionality
-- Handle dynamic shapes carefully in ONNX exports
-- Test exported models thoroughly before production deployment
-
-### Getting Help
-
-- Check PyTorch Lightning documentation: https://pytorch-lightning.readthedocs.io/
-- PyTorch Lightning GitHub discussions: https://github.com/PyTorchLightning/pytorch-lightning/discussions
-- Stack Overflow with `pytorch-lightning` tag
-
-## 📈 Performance Tips
-
-### Training Optimization
-
-- Use mixed precision training (`precision=16`) for faster training
-- Implement gradient accumulation for large effective batch sizes
-- Enable `pin_memory=True` in DataLoaders for GPU training
-- Use `num_workers > 0` for parallel data loading
-
-### Memory Management
-
-- Clear GPU cache regularly during long training sessions
-- Use gradient checkpointing for very deep networks
-- Implement proper batch size scaling for distributed training
-
-### Debugging
-
-- Enable `fast_dev_run=True` for quick debugging
-- Use `limit_train_batches` and `limit_val_batches` for testing
-- Enable detailed logging for custom loops and optimizations
-
-## 🎯 Next Steps
-
-After mastering these advanced concepts:
-
-1. **Contribute to PyTorch Lightning**: Implement features or fix bugs
-2. **Advanced Research**: Apply techniques to your specific research domain
-3. **Production Systems**: Build scalable ML systems using learned concepts
-4. **Teaching**: Share knowledge by creating tutorials or workshops
-5. **Specialization**: Focus on specific areas (distributed training, model optimization, etc.)
-
-## 📚 Additional Resources
-
-### Documentation
-
-- [PyTorch Lightning Docs](https://pytorch-lightning.readthedocs.io/)
-- [PyTorch Distributed Training](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)
-- [ONNX Documentation](https://onnx.ai/onnx/)
-
-### Research Papers
-
-- Stochastic Weight Averaging: [Paper](https://arxiv.org/abs/1803.05407)
-- Curriculum Learning: [Paper](https://ronan.collobert.com/pub/matos/2009_curriculum_icml.pdf)
-- Distributed Training: Various papers on distributed optimization
-
-### Community
-
-- PyTorch Lightning Slack: Join the community discussions
-- Twitter: Follow @PyTorchLightning for updates
-- Conferences: NeurIPS, ICML, ICLR for latest research
-
----
-
-**Happy Learning! 🚀**
-
-Remember: These are advanced topics. Take your time, experiment with the code, and don't hesitate to revisit concepts. The goal is deep understanding, not speed.
+- [Lightning documentation](https://lightning.ai/docs/pytorch/stable/)
+- [Lightning 2.0 upgrade guide](https://lightning.ai/docs/pytorch/stable/upgrade/migration_guide.html)
+- [PyTorch DDP tutorial](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)
+- [TorchMetrics](https://lightning.ai/docs/torchmetrics/stable/)
