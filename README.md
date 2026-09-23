@@ -1,248 +1,158 @@
 # LightningMasterPro
 
 ![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
-![Lightning](https://img.shields.io/badge/Lightning-792EE5?style=for-the-badge&logo=pytorch-lightning&logoColor=white)
-![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![Lightning](https://img.shields.io/badge/Lightning_2.x-792EE5?style=for-the-badge&logo=pytorch-lightning&logoColor=white)
+![Python](https://img.shields.io/badge/python_3.9+-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![Jupyter](https://img.shields.io/badge/jupyter-%23FA0F00.svg?style=for-the-badge&logo=jupyter&logoColor=white)
 
-A comprehensive **PyTorch Lightning syntax refresher** featuring 20 educational notebooks covering all core concepts, from fundamentals to advanced patterns.
+A hands-on **PyTorch Lightning 2.x** learning framework: 20 notebooks that walk from `LightningModule` basics to
+manual optimization, DDP, profiling and ONNX export, backed by a small, fully tested library (`lmpro`) that shows the
+idiomatic way to build modules, datamodules, callbacks, training drivers and a `LightningCLI`.
 
-## Overview
+Everything runs on CPU with synthetic data. No downloads, no GPU required.
 
-LightningMasterPro is a one-stop learning resource for PyTorch Lightning. It provides hands-on implementations of every major Lightning concept through a structured notebook series, synthetic data examples, and practical code patterns. The project is designed as a refresher guide for developers who want to master Lightning syntax and best practices without unnecessary complexity.
-
-## Key Features
-
-- **20 Comprehensive Notebooks**: Structured learning path from fundamentals to advanced patterns
-- **Core Lightning Concepts**: LightningModule, LightningDataModule, Trainer, callbacks, and configuration
-- **Advanced Patterns**: Manual optimization, custom training loops, curriculum learning, k-fold validation
-- **Multi-Domain Examples**: Computer vision, NLP, and tabular data implementations
-- **Distributed Training**: DDP strategies, multi-GPU optimization, and device management
-- **Performance Techniques**: Mixed precision, gradient accumulation, profiling, and compilation
-- **Production-Ready Code**: Modular architecture, proper logging, checkpointing, and validation patterns
-
-## Quick Start
+## Quick start
 
 ```bash
 git clone https://github.com/SatvikPraveen/LightningMasterPro.git
 cd LightningMasterPro
-pip install -e .
+pip install -e ".[dev,export]"        # add ,notebooks for Jupyter
+
+# Train any domain from a YAML config (LightningCLI subcommands: fit / validate / test / predict)
+python scripts/train.py fit --config configs/vision/classifier.yaml
+python scripts/train.py fit --config configs/nlp/sentiment.yaml --trainer.max_epochs 3
+python scripts/train.py test --config configs/tabular/mlp.yaml --ckpt_path checkpoints/tabular/mlp/last.ckpt
+
+# The same CLI is installed as a console script
+lmpro fit --config configs/timeseries/forecaster.yaml --trainer.fast_dev_run true
+
+# Run the test suite (≈2 minutes on a laptop CPU)
+pytest
 ```
 
-### Running the Notebooks
+## What is in the box
 
-1. **Start with fundamentals** - Open `notebooks/01_lightning_fundamentals/` to learn Lightning core concepts
-2. **Progress through domains** - Follow the numbered notebooks in sequence for structured learning
-3. **Explore implementations** - Each notebook includes working code examples with synthetic data
-4. **Reference guide** - Use notebooks as a quick syntax reference for Lightning patterns
+| Area | Contents |
+|---|---|
+| `notebooks/` | 20 notebooks in 8 modules, Lightning 2.x APIs only (see [notebooks/README.md](notebooks/README.md)) |
+| `src/lmpro/modules/` | 6 `LightningModule`s: CNN/ResNet classifier, U-Net segmenter, char-level LM, sentiment classifier (LSTM/GRU/CNN/attention), tabular MLP, LSTM/GRU/Transformer forecaster |
+| `src/lmpro/datamodules/` | 4 `LightningDataModule`s with `setup(stage)`, worker seeding, `persistent_workers`, custom collate |
+| `src/lmpro/data/` | Synthetic generators for vision, text, tabular and time-series with distinct per-split seeds |
+| `src/lmpro/callbacks/` | `EMACallback` (warm-up, resume-safe), `SWACallback` (SWALR + BatchNorm update), `EnhancedModelCheckpoint`, gradient/LR monitors |
+| `src/lmpro/loops/` | `KFoldLoop` driver, `CurriculumLoop` callback + `CurriculumDataset`, `ProgressiveUnfreezingCallback` with discriminative LRs |
+| `src/lmpro/cli.py` | `LightningMasterCLI`: `LightningCLI` subclass with `link_arguments`, experiment metadata and a `from_config` helper |
+| `configs/` | One jsonargparse config per domain plus tuning configs for the LR finder, batch-size scaler and ablations |
+| `scripts/` | train / evaluate / predict / export_onnx / tune_lr / scale_batch / benchmark / run_ablation / generate_data |
 
-### Training Examples
+## Lightning concepts covered
 
-```bash
-# Vision classifier
-python scripts/train.py --config configs/vision/classifier.yaml
+**Core mechanics**: `LightningModule` hooks, `save_hyperparameters`, `configure_optimizers` returning
+`{"optimizer", "lr_scheduler": {"scheduler", "interval", "monitor"}}`, `OneCycleLR` sized from
+`trainer.estimated_stepping_batches`, torchmetrics objects passed straight to `self.log` (DDP-safe, auto-reset),
+`predict_step`, `example_input_array`.
 
-# NLP sentiment analysis
-python scripts/train.py --config configs/nlp/sentiment.yaml
+**Data**: `prepare_data` vs `setup(stage)`, `worker_init_fn`, `pin_memory` / `persistent_workers`, `pad_sequence`
+collate, curriculum sampling via `reload_dataloaders_every_n_epochs=1`.
 
-# Learning rate finder
-python scripts/tune_lr.py --config configs/tuning/lr_finder.yaml
-```
+**Configuration**: `LightningCLI` subclassing, `add_arguments_to_parser`, `link_arguments(apply_on="instantiate")`,
+`class_path` / `init_args`, config layering with multiple `--config`, `--print_config`, `SaveConfigCallback`.
 
-## Project Structure
+**Training tricks**: mixed precision (`16-mixed` / `bf16-mixed`), gradient accumulation and clipping, `torch.compile`,
+manual optimization (`automatic_optimization=False`, `manual_backward`, `toggle_optimizer`) for GANs, EMA, SWA,
+progressive unfreezing, `Tuner.lr_find`, `Tuner.scale_batch_size`.
 
-### Core Components
+**Scale and observability**: `SimpleProfiler` / `PyTorchProfiler`, `grad_norm` logging in `on_before_optimizer_step`,
+DDP with `torchrun`, `ddp_spawn` on CPU, gloo/nccl backends, checkpoint resume with `ckpt_path`.
 
-```
-src/lmpro/
-├── modules/           # Lightning modules by domain
-│   ├── vision/        # Image classification
-│   ├── nlp/           # NLP tasks (sentiment, language modeling)
-│   └── tabular/       # Regression and classification
-├── datamodules/       # LightningDataModule implementations
-├── callbacks/         # Custom callbacks (EarlyStopping, SWA, EMA)
-├── loops/             # Custom training loops (k-fold, curriculum)
-└── utils/             # Utilities, metrics, and visualization
-```
+**Evaluation and export**: `trainer.test` / `trainer.predict`, `BasePredictionWriter`, `to_onnx` with a dynamic batch
+axis and an onnxruntime parity check, TorchScript.
 
-### Notebooks Organization
+## Learning path (20 notebooks)
 
-```
-notebooks/
-├── 01_lightning_fundamentals/      # Core Lightning concepts
-├── 02_datamodules_and_metrics/     # Data and metric handling
-├── 03_callbacks_and_checkpointing/ # Model persistence
-├── 04_performance_and_scaling/     # Optimization techniques
-├── 05_strategies_and_ddp/          # Multi-GPU and distributed training
-├── 06_advanced_mechanics/          # Custom loops and optimization
-├── 07_evaluation_export_predict/   # Testing and model export
-└── 08_projects_and_capstone/       # End-to-end projects
-```
+| Module | Notebooks | Topics |
+|---|---|---|
+| 01 Fundamentals | 01–03 | Architecture, `fast_dev_run` / `overfit_batches` / `detect_anomaly`, `LightningCLI` |
+| 02 Data and metrics | 04–05 | DataModules, TorchMetrics, `log_dict` |
+| 03 Callbacks and checkpoints | 06–07 | `ModelCheckpoint`, `EarlyStopping`, resume, custom SWA/EMA callbacks |
+| 04 Performance | 08–10 | AMP, gradient accumulation and clipping, `torch.compile`, profilers |
+| 05 Strategies and DDP | 11–12 | Accelerators, precision, strategies, single-node DDP walkthrough |
+| 06 Advanced mechanics | 13–15 | Manual optimization (GAN), k-fold with a fresh Trainer per fold, curriculum learning |
+| 07 Evaluation and export | 16–17 | Test / predict loops, ONNX and TorchScript |
+| 08 Projects and capstone | 18–20 | Mini vision and NLP projects, ablation-study capstone |
 
-## Learning Path (20 Notebooks)
+Lightning 2.0 removed the public `Loop` API. Section 06 shows the replacements: plain Python drivers that create a
+fresh `Trainer` per fold, and callbacks that mutate the dataset between epochs.
 
-### **Module 1: Lightning Fundamentals** (Notebooks 1-3)
-- PyTorch Lightning architecture and core concepts
-- Building and configuring LightningModules
-- Using Trainer and LightningCLI for configuration-driven experiments
-
-### **Module 2: Data & Metrics** (Notebooks 4-5)
-- Building LightningDataModules for efficient data loading
-- Integrating TorchMetrics for proper metric tracking
-- Logging and monitoring training progress
-
-### **Module 3: Callbacks & Checkpointing** (Notebooks 6-7)
-- Model checkpointing strategies
-- Early stopping and performance monitoring
-- Custom callbacks: SWA, EMA, and custom interventions
-
-### **Module 4: Performance & Scaling** (Notebooks 8-10)
-- Mixed precision training (AMP)
-- Gradient accumulation and clipping
-- PyTorch 2.0 model compilation
-- Profiling and performance optimization
-
-### **Module 5: Distributed Training** (Notebooks 11-12)
-- Device management and precision strategies
-- Distributed Data Parallel (DDP) single-node
-- Multi-GPU scaling and optimization
-
-### **Module 6: Advanced Mechanics** (Notebooks 13-15)
-- Manual optimization for complex scenarios
-- K-fold cross-validation workflows
-- Curriculum learning and progressive training
-
-### **Module 7: Evaluation & Export** (Notebooks 16-17)
-- Comprehensive testing and prediction loops
-- Model export to TorchScript and ONNX
-- Cross-platform deployment considerations
-
-### **Module 8: Projects & Capstone** (Notebooks 18-20)
-- End-to-end vision project with ablation studies
-- NLP project demonstrating complete workflows
-- Capstone combining all Lightning concepts
-
-## Domain Coverage
-
-### Computer Vision
-- Image classification with CNNs
-- Data augmentation and preprocessing
-- Configurable synthetic image generation
-
-### Natural Language Processing
-- Sentiment analysis and text classification
-- Character-level language modeling
-- Custom tokenization and embeddings
-
-### Tabular Data
-- Classification and regression MLPs
-- Feature engineering patterns
-- Data normalization and handling categorical features
-
-## Key Lightning Patterns Covered
-
-### Training Patterns
-- Standard supervised learning with LightningModule
-- Manual optimization for complex scenarios
-- Custom training loops with K-fold and curriculum learning
-- Distributed training with DDP
-
-### Data Handling
-- LightningDataModule best practices
-- Efficient data loading with DataLoaders
-- Proper train/val/test split management
-
-### Optimization Techniques
-- Mixed precision training (AMP)
-- Gradient accumulation and clipping
-- Learning rate scheduling
-- Model compilation with PyTorch 2.0
-
-### Monitoring & Checkpointing
-- Proper logging with Lightning loggers
-- Custom callbacks for intervention
-- Model checkpointing strategies
-- Early stopping and performance monitoring
-
-### Testing & Validation
-- Proper validation and test workflows
-- Prediction loop implementation
-- Model export and inference optimization
-
-## Synthetic Data
-
-All examples use built-in synthetic data generators, eliminating external dataset dependencies:
+## Using the library directly
 
 ```python
-from lmpro.data import create_synthetic_image_dataset, create_synthetic_text_dataset
+import lightning.pytorch as pl
+from lmpro.callbacks import EMACallback, SWACallback
+from lmpro.datamodules import VisionDataModule
+from lmpro.data import VisionDatasetConfig
+from lmpro.loops import KFoldLoop, CurriculumLoop, CurriculumDataset
+from lmpro.modules.vision.classifier import VisionClassifier
 
-# Vision data with augmentations
-vision_dm = VisionDataModule(
-    data_config=VisionDatasetConfig(num_samples=10000),
-    batch_size=64
-)
+dm = VisionDataModule(data_config=VisionDatasetConfig(num_samples=2000, image_size=(32, 32)), batch_size=64)
+model = VisionClassifier(num_classes=10, architecture="resnet", learning_rate=3e-4)
 
-# NLP data with configurable vocabulary
-nlp_dm = NLPDataModule(
-    data_config=NLPDatasetConfig(vocab_size=10000),
-    batch_size=32
-)
+trainer = pl.Trainer(max_epochs=5, callbacks=[EMACallback(decay=0.999), SWACallback(swa_epoch_start=0.8)])
+trainer.fit(model, datamodule=dm)
+
+# 5-fold cross-validation: a fresh model and Trainer per fold, results aggregated as mean/std
+results = KFoldLoop(num_folds=5).run(model, dm, trainer_kwargs={"max_epochs": 3})
+
+# Curriculum learning: the callback raises the difficulty threshold each epoch and the
+# dataloader is rebuilt because reload_dataloaders_every_n_epochs=1
+curriculum = CurriculumLoop(strategy="length")
+pl.Trainer(max_epochs=5, reload_dataloaders_every_n_epochs=1, callbacks=[curriculum]).fit(model, datamodule=dm)
 ```
 
-## Testing
+Programmatic access to the CLI, e.g. for tuning scripts:
+
+```python
+from lmpro.cli import LightningMasterCLI
+
+cli = LightningMasterCLI.from_config("configs/vision/classifier.yaml", "--trainer.max_epochs=1")
+cli.trainer.fit(cli.model, datamodule=cli.datamodule)
+```
+
+## Scripts
 
 ```bash
-# Run all tests
-pytest
+CFG=configs/vision/classifier.yaml
+CKPT=checkpoints/vision/classifier/last.ckpt
 
-# Run specific test category
-pytest tests/test_datamodules.py -v
-pytest tests/test_modules_shapes.py -v
-
-# Quick smoke tests
-pytest tests/test_step_cpu_smoke.py
+python scripts/train.py fit --config $CFG                                    # train
+python scripts/evaluate.py --config $CFG --checkpoint $CKPT --split test     # metrics -> JSON
+python scripts/predict.py  --config $CFG --checkpoint $CKPT                  # predictions.pt
+python scripts/export_onnx.py --config $CFG --checkpoint $CKPT --output exports/classifier.onnx
+python scripts/tune_lr.py --config $CFG                                      # Tuner.lr_find + plot + updated config
+python scripts/scale_batch.py --config $CFG                                  # Tuner.scale_batch_size
+python scripts/benchmark.py --config $CFG --batch_sizes 32 64 128 --compile
+python scripts/run_ablation.py --config $CFG --max_combinations 4            # grid sweep, CSV + plots
+python scripts/generate_data.py --num_samples 1000                           # cache synthetic datasets
 ```
+
+Every script accepts extra `--key value` overrides that are forwarded to the CLI, e.g.
+`--data.init_args.num_workers 0` or `--trainer.accelerator cpu`.
+
+## Development
+
+```bash
+pip install -e ".[dev,export]"
+pre-commit install
+pytest                       # 380+ tests, all CPU
+black src tests scripts && isort src tests scripts && flake8 src tests scripts
+```
+
+CI runs the lint gates, the test suite on Linux and macOS for Python 3.10–3.12, and a `fast_dev_run` of the training CLI.
 
 ## Requirements
 
-- Python 3.8+
-- PyTorch 2.0+
-- PyTorch Lightning 2.0+
-- TorchMetrics
-
-See `requirements.txt` for complete dependencies.
-
-## Getting Started
-
-1. Clone the repository
-2. Install dependencies: `pip install -e .`
-3. Open `notebooks/01_lightning_fundamentals/01_pl_architecture.ipynb` to begin
-4. Follow the numbered notebooks in order for a structured learning experience
-5. Reference the source code in `src/lmpro/` for implementation patterns
-
-## Use Cases
-
-**Perfect for:**
-- Learning PyTorch Lightning syntax and patterns
-- Quick reference guide for common Lightning patterns
-- Understanding best practices in ML training workflows
-- Building reproducible experiments with configuration-driven approaches
-
-**Not intended for:**
-- Production deployment (see official Lightning docs for that)
-- State-of-the-art model implementations
-- Advanced distributed training at scale
-
-## Resources
-
-- [PyTorch Lightning Documentation](https://pytorch-lightning.readthedocs.io/)
-- [Official Examples](https://github.com/Lightning-AI/lightning/tree/master/examples)
-- [Lightning Blog](https://www.pytorchlightning.ai/blog)
+Python 3.9+, PyTorch 2.1+, Lightning 2.1+, TorchMetrics 1.2+, jsonargparse. See `requirements.txt` and the extras in
+`setup.py` (`dev`, `docs`, `export`, `notebooks`).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-**LightningMasterPro** - Master PyTorch Lightning through hands-on learning and practical examples.
+MIT. See [LICENSE](LICENSE).
