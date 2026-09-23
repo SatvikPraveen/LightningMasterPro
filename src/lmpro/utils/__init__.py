@@ -4,46 +4,54 @@
 Utility functions and helpers for LightningMasterPro
 """
 
-from .seed import seed_everything_deterministic, get_random_state
+from .interpretability import (
+    ActivationStatsHook,
+    compute_saliency_map,
+    feature_importance_perturbation,
+    integrated_gradients,
+    occlusion_sensitivity,
+)
 from .metrics import (
-    get_metrics_dict,
-    log_confusion_matrix,
     compute_classification_metrics,
     compute_regression_metrics,
+    get_metrics_dict,
+    log_confusion_matrix,
+)
+from .seed import (
+    SeedContext,
+    get_random_state,
+    seed_everything_deterministic,
+    set_random_state,
+    worker_init_fn,
 )
 from .viz import (
-    plot_training_curves,
-    plot_predictions,
+    create_learning_curve_dashboard,
     plot_confusion_matrix,
     plot_feature_importance,
+    plot_predictions,
+    plot_training_curves,
     save_plot,
-)
-from .interpretability import (
-    compute_saliency_map,
-    integrated_gradients,
-    feature_importance_perturbation,
-    occlusion_sensitivity,
-    ActivationStatsHook,
 )
 
 __all__ = [
     # Seed utilities
     "seed_everything_deterministic",
     "get_random_state",
-    
+    "set_random_state",
+    "SeedContext",
+    "worker_init_fn",
     # Metrics utilities
     "get_metrics_dict",
-    "log_confusion_matrix", 
+    "log_confusion_matrix",
     "compute_classification_metrics",
     "compute_regression_metrics",
-    
     # Visualization utilities
     "plot_training_curves",
     "plot_predictions",
     "plot_confusion_matrix",
     "plot_feature_importance",
     "save_plot",
-
+    "create_learning_curve_dashboard",
     # Interpretability utilities
     "compute_saliency_map",
     "integrated_gradients",

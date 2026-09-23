@@ -10,14 +10,13 @@ Provides lightweight, dependency-free tools for:
 - Activation statistics summary
 """
 
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
-import numpy as np
-
 
 # ─── Gradient-Based Saliency ─────────────────────────────────────────────────
+
 
 def compute_saliency_map(
     model: nn.Module,
@@ -60,6 +59,7 @@ def compute_saliency_map(
 
 
 # ─── Integrated Gradients ────────────────────────────────────────────────────
+
 
 def integrated_gradients(
     model: nn.Module,
@@ -118,6 +118,7 @@ def integrated_gradients(
 
 
 # ─── Perturbation-Based Feature Importance (Tabular) ─────────────────────────
+
 
 def feature_importance_perturbation(
     model: nn.Module,
@@ -181,6 +182,7 @@ def feature_importance_perturbation(
 
 # ─── Occlusion Sensitivity (Vision) ──────────────────────────────────────────
 
+
 def occlusion_sensitivity(
     model: nn.Module,
     image: torch.Tensor,
@@ -241,6 +243,23 @@ def occlusion_sensitivity(
 
 # ─── Activation Statistics ───────────────────────────────────────────────────
 
+
+def _primary_output(output) -> Optional[torch.Tensor]:
+    """
+    Extract the activation tensor from a module output.
+
+    Recurrent layers (LSTM/GRU/RNN) return ``(output, hidden)`` tuples and may
+    wrap ``output`` in a ``PackedSequence``; other modules return a tensor.
+    """
+    while isinstance(output, (tuple, list)):
+        if not output:
+            return None
+        output = output[0]
+    if isinstance(output, nn.utils.rnn.PackedSequence):
+        output = output.data
+    return output if isinstance(output, torch.Tensor) else None
+
+
 class ActivationStatsHook:
     """
     Registers forward hooks on named modules to capture activation statistics.
@@ -263,8 +282,7 @@ class ActivationStatsHook:
 
         named_modules = dict(model.named_modules())
         if layers is None:
-            layers = [n for n, m in named_modules.items()
-                      if isinstance(m, (nn.Linear, nn.Conv2d, nn.LSTM, nn.GRU))]
+            layers = [n for n, m in named_modules.items() if isinstance(m, (nn.Linear, nn.Conv2d, nn.LSTM, nn.GRU))]
 
         for layer_name in layers:
             if layer_name not in named_modules:
@@ -273,7 +291,10 @@ class ActivationStatsHook:
 
             def make_hook(name):
                 def hook_fn(module, input, output):
-                    act = output.detach().float()
+                    act = _primary_output(output)
+                    if act is None:
+                        return
+                    act = act.detach().float()
                     self.stats[name] = {
                         "mean": act.mean().item(),
                         "std": act.std().item(),
@@ -281,6 +302,7 @@ class ActivationStatsHook:
                         "max": act.max().item(),
                         "dead_fraction": (act == 0).float().mean().item(),
                     }
+
                 return hook_fn
 
             handle = module.register_forward_hook(make_hook(layer_name))

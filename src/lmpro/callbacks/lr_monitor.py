@@ -7,7 +7,6 @@ with optional warmup detection and anomaly alerting.
 """
 
 from typing import Dict, List, Optional, Tuple
-import warnings
 
 import torch
 from lightning import LightningModule, Trainer
@@ -80,8 +79,9 @@ class LRMonitorCallback(Callback):
             for pg_idx, pg in enumerate(optimizer.param_groups):
                 lr = pg["lr"]
                 tag = f"lr/opt_{opt_idx}_pg_{pg_idx}"
-                pl_module.log(tag, lr, on_step=(self.logging_interval == "step"),
-                              on_epoch=True, prog_bar=False, logger=True)
+                pl_module.log(
+                    tag, lr, on_step=(self.logging_interval == "step"), on_epoch=True, prog_bar=False, logger=True
+                )
 
                 # History tracking
                 if tag not in self._lr_history:

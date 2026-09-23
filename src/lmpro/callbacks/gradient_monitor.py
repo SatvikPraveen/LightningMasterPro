@@ -6,7 +6,7 @@ Tracks gradient norms, detects vanishing/exploding gradients, and optionally
 logs per-layer gradient statistics for debugging deep training runs.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -70,9 +70,7 @@ class GradientMonitorCallback(Callback):
         )
         return total_norm.item()
 
-    def _log_per_layer_norms(
-        self, model: nn.Module, pl_module: LightningModule
-    ) -> None:
+    def _log_per_layer_norms(self, model: nn.Module, pl_module: LightningModule) -> None:
         """Log gradient norm for each named parameter."""
         for name, param in model.named_parameters():
             if param.grad is None:
@@ -137,13 +135,11 @@ class GradientMonitorCallback(Callback):
     ) -> None:
         if self._vanishing_count:
             rank_zero_warn(
-                f"GradientMonitor: {self._vanishing_count} vanishing gradient "
-                "events detected during training."
+                f"GradientMonitor: {self._vanishing_count} vanishing gradient " "events detected during training."
             )
         if self._exploding_count:
             rank_zero_warn(
-                f"GradientMonitor: {self._exploding_count} exploding gradient "
-                "events detected during training."
+                f"GradientMonitor: {self._exploding_count} exploding gradient " "events detected during training."
             )
 
     # ------------------------------------------------------------------

@@ -7,14 +7,13 @@ Layers are frozen at the start and unfrozen in groups from the top (output side)
 toward the bottom (input/embedding side) at configurable epoch intervals.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
 import re
+from typing import List, Optional, Tuple
 
-import torch
 import torch.nn as nn
-from lightning import LightningModule, Trainer
+from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
-from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_warn
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
 
 class ProgressiveUnfreezingCallback(Callback):
@@ -36,8 +35,13 @@ class ProgressiveUnfreezingCallback(Callback):
             If None, groups are auto-detected from model's direct children.
         always_train_params: Regex patterns for parameters that are always trained
             (e.g., batch-norm layers). Default: batch-norm and bias params.
-        lr_scale_factor: If set, learning rate of newly unfrozen layers is
-            multiplied by this factor relative to the current LR.
+        lr_scale_factor: If set, discriminative learning rates are used: the
+            parameters of group ``k`` (0 = output side, unfrozen first) are moved
+            into their own optimizer parameter group with
+            ``lr = base_lr * lr_scale_factor ** k`` when the group is unfrozen,
+            so deeper (input-side) layers train with smaller learning rates.
+            Note that LR schedulers created before the new parameter groups
+            exist will not see them.
         verbose: Log unfreezing events to console.
     """
 
@@ -62,6 +66,9 @@ class ProgressiveUnfreezingCallback(Callback):
         ]
         self.lr_scale_factor = lr_scale_factor
         self.verbose = verbose
+
+        if lr_scale_factor is not None and lr_scale_factor <= 0:
+            raise ValueError("lr_scale_factor must be > 0")
 
         self._resolved_groups: List[List[str]] = []
         self._unfrozen_group_idx: int = 0  # next group to unfreeze
@@ -88,10 +95,7 @@ class ProgressiveUnfreezingCallback(Callback):
 
         groups: List[List[str]] = []
         for child_name, child_module in reversed(children):
-            group = [
-                f"{child_name}.{pname}"
-                for pname, _ in child_module.named_parameters()
-            ]
+            group = [f"{child_name}.{pname}" for pname, _ in child_module.named_parameters()]
             if group:
                 groups.append(group)
         return groups
@@ -116,6 +120,41 @@ class ProgressiveUnfreezingCallback(Callback):
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         return trainable, total
 
+    def _apply_discriminative_lr(
+        self, trainer: "Trainer", pl_module: "LightningModule", param_names: List[str], group_idx: int
+    ) -> None:
+        """Move the group's params into a dedicated param group with a scaled LR."""
+        if self.lr_scale_factor is None:
+            return
+        param_dict = dict(pl_module.named_parameters())
+        group_params = [param_dict[n] for n in param_names if n in param_dict]
+        group_ids = {id(p) for p in group_params}
+        scale = self.lr_scale_factor**group_idx
+
+        for optimizer in trainer.optimizers:
+            moved = []
+            base_lr = None
+            for pg in optimizer.param_groups:
+                keep = []
+                for p in pg["params"]:
+                    if id(p) in group_ids:
+                        moved.append(p)
+                        if base_lr is None:
+                            base_lr = pg.get("initial_lr", pg["lr"])
+                    else:
+                        keep.append(p)
+                pg["params"] = keep
+            if not moved:
+                continue
+            optimizer.add_param_group({"params": moved, "lr": base_lr * scale})
+            # Drop param groups that became empty after the move
+            optimizer.param_groups[:] = [pg for pg in optimizer.param_groups if pg["params"]]
+            if self.verbose:
+                rank_zero_info(
+                    f"ProgressiveUnfreezing: group {group_idx} lr = {base_lr * scale:.3e} "
+                    f"(base {base_lr:.3e} x {self.lr_scale_factor}^{group_idx})"
+                )
+
     # ------------------------------------------------------------------
     # Callback hooks
     # ------------------------------------------------------------------
@@ -135,9 +174,7 @@ class ProgressiveUnfreezingCallback(Callback):
             trainable, total = self._count_trainable(pl_module)
             rank_zero_info(f"  Trainable params: {trainable:,} / {total:,}")
 
-    def on_train_epoch_start(
-        self, trainer: "Trainer", pl_module: "LightningModule"
-    ) -> None:
+    def on_train_epoch_start(self, trainer: "Trainer", pl_module: "LightningModule") -> None:
         epoch = trainer.current_epoch
 
         if epoch < self.start_epoch:
@@ -150,6 +187,7 @@ class ProgressiveUnfreezingCallback(Callback):
         while self._unfrozen_group_idx < target_unfrozen:
             group = self._resolved_groups[self._unfrozen_group_idx]
             self._set_requires_grad(pl_module, group, True)
+            self._apply_discriminative_lr(trainer, pl_module, group, self._unfrozen_group_idx)
 
             if self.verbose:
                 rank_zero_info(
@@ -161,9 +199,7 @@ class ProgressiveUnfreezingCallback(Callback):
 
         if self.verbose and (epochs_since_start % self.unfreeze_every_n_epochs == 0):
             trainable, total = self._count_trainable(pl_module)
-            rank_zero_info(
-                f"[Epoch {epoch}] Trainable: {trainable:,} / {total:,} params"
-            )
+            rank_zero_info(f"[Epoch {epoch}] Trainable: {trainable:,} / {total:,} params")
 
     def on_train_end(self, trainer: "Trainer", pl_module: "LightningModule") -> None:
         # Unfreeze all params at the end so the model is fully usable
