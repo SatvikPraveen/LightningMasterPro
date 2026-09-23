@@ -6,7 +6,7 @@ Synthetic vision data generation for classification and segmentation tasks
 
 import random
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -61,8 +61,8 @@ class SyntheticImageDataset(Dataset):
 
     def _generate_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Generate synthetic image data with different patterns"""
-        images = []
-        labels = []
+        image_list: List[torch.Tensor] = []
+        label_list: List[int] = []
 
         seed_split(self.split)
 
@@ -73,11 +73,11 @@ class SyntheticImageDataset(Dataset):
             # Generate image based on class
             image = self._create_class_image(label)
 
-            images.append(image)
-            labels.append(label)
+            image_list.append(image)
+            label_list.append(label)
 
-        images = torch.stack(images)
-        labels = torch.tensor(labels, dtype=torch.long)
+        images = torch.stack(image_list)
+        labels = torch.tensor(label_list, dtype=torch.long)
 
         return images, labels
 
@@ -226,8 +226,8 @@ class SyntheticImageDataset(Dataset):
             # Convert to PIL for transforms
             if image.dim() == 3:
                 image = image.permute(1, 2, 0)
-            image = Image.fromarray((image * 255).numpy().astype(np.uint8))
-            image = self.transform(image)
+            pil_image = Image.fromarray((image * 255).numpy().astype(np.uint8))
+            image = self.transform(pil_image)
 
         return image, label
 
@@ -245,18 +245,18 @@ class SyntheticSegmentationDataset(Dataset):
 
     def _generate_segmentation_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Generate synthetic segmentation data"""
-        images = []
-        masks = []
+        image_list: List[torch.Tensor] = []
+        mask_list: List[torch.Tensor] = []
 
         seed_split(self.split)
 
         for i in range(self.config.num_samples):
             image, mask = self._create_segmentation_pair()
-            images.append(image)
-            masks.append(mask)
+            image_list.append(image)
+            mask_list.append(mask)
 
-        images = torch.stack(images)
-        masks = torch.stack(masks)
+        images = torch.stack(image_list)
+        masks = torch.stack(mask_list)
 
         return images, masks
 
@@ -333,10 +333,10 @@ class SyntheticSegmentationDataset(Dataset):
 def create_synthetic_image_dataset(
     config: VisionDatasetConfig,
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, SyntheticImageDataset]:
     """Create synthetic image classification datasets"""
-    datasets = {}
+    datasets: Dict[str, SyntheticImageDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -360,10 +360,10 @@ def create_synthetic_image_dataset(
 def create_synthetic_segmentation_dataset(
     config: VisionDatasetConfig,
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, SyntheticSegmentationDataset]:
     """Create synthetic segmentation datasets"""
-    datasets = {}
+    datasets: Dict[str, SyntheticSegmentationDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]

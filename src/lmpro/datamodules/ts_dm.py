@@ -4,7 +4,7 @@
 Time Series DataModule for forecasting and classification tasks
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -12,6 +12,7 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader
 
 from ..data.synth_timeseries import (
+    TimeSeriesDataset,
     TimeSeriesDatasetConfig,
     create_synthetic_timeseries_dataset,
 )
@@ -62,10 +63,10 @@ class TimeSeriesDataModule(LightningDataModule):
         self.num_features = self.data_config.num_features
 
         # Datasets (generated in setup(); nothing to download)
-        self.datasets = None
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        self.datasets: Optional[Mapping[str, TimeSeriesDataset]] = None
+        self.train_dataset: Optional[TimeSeriesDataset] = None
+        self.val_dataset: Optional[TimeSeriesDataset] = None
+        self.test_dataset: Optional[TimeSeriesDataset] = None
 
     def prepare_data(self) -> None:
         """Nothing to download: synthetic data is generated in-memory in setup()"""
@@ -84,6 +85,7 @@ class TimeSeriesDataModule(LightningDataModule):
         """Setup datasets for each stage (runs on every process)"""
         if self.datasets is None:
             self._build_datasets()
+        assert self.datasets is not None
 
         if stage == "fit" or stage is None:
             self.train_dataset = self.datasets["train"]
@@ -265,7 +267,7 @@ class TimeSeriesDataModule(LightningDataModule):
             torch.stack(all_targets) if self.task == "forecasting" else torch.tensor([t.item() for t in all_targets])
         )
 
-        stats = {
+        stats: Dict[str, Any] = {
             "sequence_length": self.sequence_length,
             "num_features": self.num_features,
             "num_samples_analyzed": sample_size,

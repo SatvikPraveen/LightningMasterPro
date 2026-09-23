@@ -7,8 +7,8 @@ Synthetic NLP data generation for text classification and language modeling
 import random
 import string
 from collections import Counter
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, replace
+from typing import Any, Dict, List, Optional, Sequence, Set, Sized, Tuple, cast
 
 import numpy as np
 import torch
@@ -315,7 +315,7 @@ class CharacterLevelDataset(Dataset):
     @classmethod
     def build_char_vocab(cls) -> List[str]:
         """Characters that can appear in any split, with ``<pad>`` at index 0"""
-        charset = set()
+        charset: Set[str] = set()
         for pattern in cls.PATTERNS:
             charset.update(pattern)
             charset.update(pattern.upper())
@@ -479,27 +479,19 @@ class SentimentDataset(Dataset):
         return tokens, sentiment
 
 
-def _split_config(config: NLPDatasetConfig, num_samples: int, **overrides) -> NLPDatasetConfig:
-    values = dict(
-        num_samples=num_samples,
-        vocab_size=config.vocab_size,
-        max_sequence_length=config.max_sequence_length,
-        min_sequence_length=config.min_sequence_length,
-        num_classes=config.num_classes,
-        noise_level=config.noise_level,
-        save_path=config.save_path,
-    )
-    values.update(overrides)
-    return NLPDatasetConfig(**values)
+def _split_config(config: NLPDatasetConfig, num_samples: int, **overrides: Any) -> NLPDatasetConfig:
+    """Copy ``config`` for one split, overriding ``num_samples`` and any extra fields"""
+    changes: Dict[str, Any] = {"num_samples": num_samples, **overrides}
+    return replace(config, **changes)
 
 
 def create_synthetic_text_dataset(
     config: NLPDatasetConfig,
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, SyntheticTextDataset]:
     """Create synthetic text classification datasets sharing one vocabulary"""
-    datasets = {}
+    datasets: Dict[str, SyntheticTextDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -514,10 +506,10 @@ def create_synthetic_text_dataset(
 def create_synthetic_sentiment_dataset(
     config: NLPDatasetConfig,
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, SentimentDataset]:
     """Create synthetic sentiment analysis datasets sharing one vocabulary"""
-    datasets = {}
+    datasets: Dict[str, SentimentDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -535,10 +527,10 @@ def create_character_level_dataset(
     config: NLPDatasetConfig,
     sequence_length: int = 100,
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, CharacterLevelDataset]:
     """Create character-level language modeling datasets"""
-    datasets = {}
+    datasets: Dict[str, CharacterLevelDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -553,7 +545,7 @@ def create_character_level_dataset(
 def print_dataset_stats(dataset: Dataset, name: str = "Dataset") -> None:
     """Print statistics about the dataset"""
     print(f"\n{name} Statistics:")
-    print(f"Size: {len(dataset)}")
+    print(f"Size: {len(cast(Sized, dataset))}")
 
     if hasattr(dataset, "vocab"):
         print(f"Vocabulary size: {len(dataset.vocab)}")
@@ -564,7 +556,7 @@ def print_dataset_stats(dataset: Dataset, name: str = "Dataset") -> None:
 
     # Sample a few examples
     print("\nSample examples:")
-    for i in range(min(3, len(dataset))):
+    for i in range(min(3, len(cast(Sized, dataset)))):
         data, target = dataset[i]
         if hasattr(dataset, "idx_to_word") and isinstance(data, torch.Tensor):
             text = " ".join(

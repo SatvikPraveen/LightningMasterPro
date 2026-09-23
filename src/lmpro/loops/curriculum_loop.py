@@ -26,7 +26,7 @@ Example::
 
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sized, Tuple, Union, cast
 
 import numpy as np
 import torch
@@ -34,6 +34,11 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_warn
 from torch.utils.data import DataLoader, Dataset
+
+
+def _dataset_len(dataset: Dataset) -> int:
+    """Length of a map-style dataset (``Dataset`` does not declare ``__len__``)."""
+    return len(cast(Sized, dataset))
 
 
 class CurriculumStrategy(ABC):
@@ -67,7 +72,7 @@ class LengthBasedCurriculum(CurriculumStrategy):
         self, dataset: Dataset, model: Optional[LightningModule] = None, recompute: bool = False
     ) -> np.ndarray:
         lengths = []
-        for i in range(len(dataset)):
+        for i in range(_dataset_len(dataset)):
             sample = dataset[i]
             x = sample[0] if isinstance(sample, (tuple, list)) else sample
             if isinstance(x, torch.Tensor):
@@ -111,13 +116,13 @@ class LossBasedCurriculum(CurriculumStrategy):
         if model is None:
             # No model yet: random scores, deliberately NOT cached so a later
             # model-based call replaces them.
-            return np.random.random(len(dataset))
+            return np.random.random(_dataset_len(dataset))
 
         was_training = model.training
         model.eval()
         losses = []
         with torch.no_grad():
-            for i in range(len(dataset)):
+            for i in range(_dataset_len(dataset)):
                 sample = dataset[i]
                 if isinstance(sample, (tuple, list)) and len(sample) >= 2:
                     x, y = sample[0], sample[1]
@@ -168,7 +173,7 @@ class RandomCurriculum(CurriculumStrategy):
     def get_difficulty_scores(
         self, dataset: Dataset, model: Optional[LightningModule] = None, recompute: bool = False
     ) -> np.ndarray:
-        return np.random.random(len(dataset))
+        return np.random.random(_dataset_len(dataset))
 
     def get_curriculum_schedule(self, total_epochs: int, dataset_size: int) -> List[Tuple[int, float]]:
         return [(epoch, 0.2 + 0.8 * epoch / max(1, total_epochs - 1)) for epoch in range(total_epochs)]
@@ -191,24 +196,24 @@ class CurriculumDataset(Dataset):
         min_samples: int = 1,
     ):
         self.dataset = dataset
-        self.min_samples = max(1, min(min_samples, len(dataset)))
+        self.min_samples = max(1, min(min_samples, _dataset_len(dataset)))
         self.threshold = threshold
         self.difficulty_scores: Optional[np.ndarray] = None
-        self._active_indices = np.arange(len(dataset))
+        self._active_indices = np.arange(_dataset_len(dataset))
         if difficulty_scores is not None:
             self.set_difficulty_scores(difficulty_scores)
 
     def set_difficulty_scores(self, scores: np.ndarray) -> None:
         scores = np.asarray(scores, dtype=np.float64)
-        if scores.shape != (len(self.dataset),):
-            raise ValueError(f"Expected {len(self.dataset)} scores, got shape {scores.shape}")
+        if scores.shape != (_dataset_len(self.dataset),):
+            raise ValueError(f"Expected {_dataset_len(self.dataset)} scores, got shape {scores.shape}")
         self.difficulty_scores = scores
         self.set_threshold(self.threshold)
 
     def set_threshold(self, threshold: float) -> None:
         self.threshold = float(threshold)
         if self.difficulty_scores is None:
-            self._active_indices = np.arange(len(self.dataset))
+            self._active_indices = np.arange(_dataset_len(self.dataset))
             return
         selected = np.flatnonzero(self.difficulty_scores <= self.threshold)
         if len(selected) < self.min_samples:
@@ -221,7 +226,7 @@ class CurriculumDataset(Dataset):
 
     @property
     def total_size(self) -> int:
-        return len(self.dataset)
+        return _dataset_len(self.dataset)
 
     def __len__(self) -> int:
         return int(len(self._active_indices))
@@ -367,7 +372,8 @@ class CurriculumLoop(Callback):
             )
             return
 
-        if trainer.reload_dataloaders_every_n_epochs != 1:
+        # Set by the DataConnector at runtime rather than declared on ``Trainer``.
+        if getattr(trainer, "reload_dataloaders_every_n_epochs", None) != 1:
             rank_zero_warn(
                 "CurriculumLoop requires Trainer(reload_dataloaders_every_n_epochs=1) so the "
                 "train dataloader is rebuilt with the new subset every epoch."

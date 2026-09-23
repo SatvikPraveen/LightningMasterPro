@@ -4,7 +4,7 @@
 Metrics utilities for comprehensive model evaluation
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, cast
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -26,6 +26,45 @@ from torchmetrics import (
 )
 from torchmetrics.functional import confusion_matrix
 
+# Literal aliases matching the argument types torchmetrics declares.
+BinaryOrMulticlass = Literal["binary", "multiclass"]
+AverageMethod = Literal["micro", "macro", "weighted", "none"]
+MacroAverageMethod = Literal["macro", "weighted", "none"]
+NormalizeMethod = Literal["true", "pred", "all", "none"]
+
+_BINARY_OR_MULTICLASS = ("binary", "multiclass")
+_AVERAGE_METHODS = ("micro", "macro", "weighted", "none")
+_MACRO_AVERAGE_METHODS = ("macro", "weighted", "none")
+_NORMALIZE_METHODS = ("true", "pred", "all", "none")
+
+
+def _binary_or_multiclass(task: str) -> BinaryOrMulticlass:
+    """Validate ``task`` and narrow it to the literal type torchmetrics expects"""
+    if task not in _BINARY_OR_MULTICLASS:
+        raise ValueError(f"Expected task to be one of {_BINARY_OR_MULTICLASS}, got {task!r}")
+    return cast(BinaryOrMulticlass, task)
+
+
+def _average_method(average: Optional[str]) -> Optional[AverageMethod]:
+    """Validate an averaging strategy accepted by accuracy / precision / recall / F1"""
+    if average is not None and average not in _AVERAGE_METHODS:
+        raise ValueError(f"Expected average to be one of {_AVERAGE_METHODS} or None, got {average!r}")
+    return cast(Optional[AverageMethod], average)
+
+
+def _macro_average_method(average: Optional[str]) -> Optional[MacroAverageMethod]:
+    """Validate an averaging strategy accepted by AUROC / average precision ('micro' is not)"""
+    if average is not None and average not in _MACRO_AVERAGE_METHODS:
+        raise ValueError(f"Expected average to be one of {_MACRO_AVERAGE_METHODS} or None, got {average!r}")
+    return cast(Optional[MacroAverageMethod], average)
+
+
+def _normalize_method(normalize: Optional[str]) -> Optional[NormalizeMethod]:
+    """Validate a confusion-matrix normalisation mode"""
+    if normalize is not None and normalize not in _NORMALIZE_METHODS:
+        raise ValueError(f"Expected normalize to be one of {_NORMALIZE_METHODS} or None, got {normalize!r}")
+    return cast(Optional[NormalizeMethod], normalize)
+
 
 def get_metrics_dict(
     task: str = "multiclass",
@@ -45,19 +84,22 @@ def get_metrics_dict(
     Returns:
         Dictionary of initialized metric objects
     """
-    metrics = {}
+    metrics: Dict[str, Any] = {}
 
     if task in ["binary", "multiclass"]:
+        cls_task = _binary_or_multiclass(task)
+        avg = _average_method(average)
+        macro_avg = _macro_average_method(average)
         metrics.update(
             {
-                "accuracy": Accuracy(task=task, num_classes=num_classes, average=average),
-                "precision": Precision(task=task, num_classes=num_classes, average=average),
-                "recall": Recall(task=task, num_classes=num_classes, average=average),
-                "f1": F1Score(task=task, num_classes=num_classes, average=average),
-                "auroc": AUROC(task=task, num_classes=num_classes, average=average),
-                "avg_precision": AveragePrecision(task=task, num_classes=num_classes, average=average),
-                "confusion_matrix": ConfusionMatrix(task=task, num_classes=num_classes),
-                "calibration_error": CalibrationError(task=task, num_classes=num_classes),
+                "accuracy": Accuracy(task=cls_task, num_classes=num_classes, average=avg),
+                "precision": Precision(task=cls_task, num_classes=num_classes, average=avg),
+                "recall": Recall(task=cls_task, num_classes=num_classes, average=avg),
+                "f1": F1Score(task=cls_task, num_classes=num_classes, average=avg),
+                "auroc": AUROC(task=cls_task, num_classes=num_classes, average=macro_avg),
+                "avg_precision": AveragePrecision(task=cls_task, num_classes=num_classes, average=macro_avg),
+                "confusion_matrix": ConfusionMatrix(task=cls_task, num_classes=num_classes),
+                "calibration_error": CalibrationError(task=cls_task, num_classes=num_classes),
             }
         )
 
@@ -65,22 +107,24 @@ def get_metrics_dict(
         if task == "multiclass" and num_classes:
             metrics.update(
                 {
-                    "accuracy_per_class": Accuracy(task=task, num_classes=num_classes, average=None),
-                    "precision_per_class": Precision(task=task, num_classes=num_classes, average=None),
-                    "recall_per_class": Recall(task=task, num_classes=num_classes, average=None),
-                    "f1_per_class": F1Score(task=task, num_classes=num_classes, average=None),
+                    "accuracy_per_class": Accuracy(task="multiclass", num_classes=num_classes, average=None),
+                    "precision_per_class": Precision(task="multiclass", num_classes=num_classes, average=None),
+                    "recall_per_class": Recall(task="multiclass", num_classes=num_classes, average=None),
+                    "f1_per_class": F1Score(task="multiclass", num_classes=num_classes, average=None),
                 }
             )
 
     elif task == "multilabel":
+        avg = _average_method(average)
+        macro_avg = _macro_average_method(average)
         metrics.update(
             {
-                "accuracy": Accuracy(task=task, num_labels=num_labels, average=average),
-                "precision": Precision(task=task, num_labels=num_labels, average=average),
-                "recall": Recall(task=task, num_labels=num_labels, average=average),
-                "f1": F1Score(task=task, num_labels=num_labels, average=average),
-                "auroc": AUROC(task=task, num_labels=num_labels, average=average),
-                "avg_precision": AveragePrecision(task=task, num_labels=num_labels, average=average),
+                "accuracy": Accuracy(task="multilabel", num_labels=num_labels, average=avg),
+                "precision": Precision(task="multilabel", num_labels=num_labels, average=avg),
+                "recall": Recall(task="multilabel", num_labels=num_labels, average=avg),
+                "f1": F1Score(task="multilabel", num_labels=num_labels, average=avg),
+                "auroc": AUROC(task="multilabel", num_labels=num_labels, average=macro_avg),
+                "avg_precision": AveragePrecision(task="multilabel", num_labels=num_labels, average=macro_avg),
             }
         )
 
@@ -125,13 +169,13 @@ def compute_classification_metrics(
         probs = torch.sigmoid(preds.reshape(-1))  # (N,) positive-class probability
         pred_labels = (probs > 0.5).long()
 
-    task = "binary" if num_classes == 2 else "multiclass"
+    task: BinaryOrMulticlass = "binary" if num_classes == 2 else "multiclass"
 
     # Binary torchmetrics expect (N,) positive-class probabilities, not (N, 2)
     if task == "binary" and probs.dim() == 2:
         probs = probs[:, 1]
 
-    results = {}
+    results: Dict[str, Any] = {}
 
     # Basic metrics
     acc = Accuracy(task=task, num_classes=num_classes)
@@ -205,7 +249,7 @@ def compute_regression_metrics(preds: torch.Tensor, targets: torch.Tensor, retur
     Returns:
         Dictionary of computed metrics
     """
-    results = {}
+    results: Dict[str, float] = {}
 
     # Basic metrics
     mse_metric = MeanSquaredError()
@@ -244,7 +288,7 @@ def log_confusion_matrix(
     targets: torch.Tensor,
     num_classes: int,
     class_names: Optional[List[str]] = None,
-    normalize: str = "true",
+    normalize: Optional[str] = "true",
     stage: str = "val",
 ) -> torch.Tensor:
     """
@@ -269,18 +313,21 @@ def log_confusion_matrix(
         pred_labels = preds
 
     # Compute confusion matrix
-    task = "binary" if num_classes == 2 else "multiclass"
-    cm = confusion_matrix(pred_labels, targets, task=task, num_classes=num_classes, normalize=normalize)
+    task: BinaryOrMulticlass = "binary" if num_classes == 2 else "multiclass"
+    cm = confusion_matrix(
+        pred_labels, targets, task=task, num_classes=num_classes, normalize=_normalize_method(normalize)
+    )
 
     # Create visualization
+    tick_labels: List[str] = class_names or [str(i) for i in range(num_classes)]
     plt.figure(figsize=(8, 6))
     sns.heatmap(
         cm.cpu().numpy(),
         annot=True,
         fmt=".2f" if normalize else "d",
         cmap="Blues",
-        xticklabels=class_names or list(range(num_classes)),
-        yticklabels=class_names or list(range(num_classes)),
+        xticklabels=tick_labels,
+        yticklabels=tick_labels,
     )
     plt.title(f"Confusion Matrix - {stage.upper()}")
     plt.ylabel("True Label")
@@ -295,7 +342,7 @@ def log_confusion_matrix(
     return cm
 
 
-def compute_calibration_metrics(probs: torch.Tensor, targets: torch.Tensor, num_bins: int = 10) -> Dict[str, float]:
+def compute_calibration_metrics(probs: torch.Tensor, targets: torch.Tensor, num_bins: int = 10) -> Dict[str, Any]:
     """
     Compute calibration metrics (ECE, MCE, etc.)
 
@@ -305,7 +352,7 @@ def compute_calibration_metrics(probs: torch.Tensor, targets: torch.Tensor, num_
         num_bins: Number of bins for calibration
 
     Returns:
-        Dictionary of calibration metrics
+        Dictionary of calibration metrics (``ece``/``mce`` floats plus per-bin lists)
     """
     # Expected Calibration Error
     ece_metric = CalibrationError(task="multiclass", num_classes=probs.size(1), n_bins=num_bins)
@@ -320,9 +367,9 @@ def compute_calibration_metrics(probs: torch.Tensor, targets: torch.Tensor, num_
     bin_lowers = bin_boundaries[:-1]
     bin_uppers = bin_boundaries[1:]
 
-    bin_accuracies = []
-    bin_confidences = []
-    bin_counts = []
+    bin_accuracies: List[float] = []
+    bin_confidences: List[float] = []
+    bin_counts: List[int] = []
 
     for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
         in_bin = max_probs.gt(bin_lower.item()) & max_probs.le(bin_upper.item())
@@ -334,22 +381,22 @@ def compute_calibration_metrics(probs: torch.Tensor, targets: torch.Tensor, num_
 
             bin_accuracies.append(accuracy_in_bin.item())
             bin_confidences.append(avg_confidence_in_bin.item())
-            bin_counts.append(in_bin.sum().item())
+            bin_counts.append(int(in_bin.sum().item()))
         else:
             bin_accuracies.append(0)
             bin_confidences.append(0)
             bin_counts.append(0)
 
     # Maximum Calibration Error
-    bin_accuracies = torch.tensor(bin_accuracies)
-    bin_confidences = torch.tensor(bin_confidences)
-    mce = torch.max(torch.abs(bin_accuracies - bin_confidences)).item()
+    bin_accuracies_t = torch.tensor(bin_accuracies)
+    bin_confidences_t = torch.tensor(bin_confidences)
+    mce = torch.max(torch.abs(bin_accuracies_t - bin_confidences_t)).item()
 
     return {
         "ece": ece,
         "mce": mce,
-        "bin_accuracies": bin_accuracies.tolist(),
-        "bin_confidences": bin_confidences.tolist(),
+        "bin_accuracies": bin_accuracies_t.tolist(),
+        "bin_confidences": bin_confidences_t.tolist(),
         "bin_counts": bin_counts,
     }
 

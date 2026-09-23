@@ -5,14 +5,15 @@ Time series forecasting module with multiple architectures
 """
 
 import math
-from typing import Any, Dict, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from lightning.pytorch import LightningModule
-from torch.optim import Adam, AdamW
+from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRScheduler
+from torch.optim import Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
-from torchmetrics import MeanAbsoluteError, MeanSquaredError, R2Score
+from torchmetrics import MeanAbsoluteError, MeanSquaredError, Metric, MetricCollection, R2Score
 
 
 class TimeSeriesForecaster(LightningModule):
@@ -66,7 +67,7 @@ class TimeSeriesForecaster(LightningModule):
 
         # Build model based on architecture
         if architecture == "lstm":
-            self.encoder = nn.LSTM(
+            self.encoder: nn.Module = nn.LSTM(
                 input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0
             )
         elif architecture == "gru":
@@ -143,16 +144,15 @@ class TimeSeriesForecaster(LightningModule):
             {"input_proj": input_proj, "pos_encoding": pos_encoding, "transformer": transformer_encoder}
         )
 
-    def _create_metrics(self, stage: str) -> nn.ModuleDict:
+    def _create_metrics(self, stage: str) -> MetricCollection:
         """Create metrics for forecasting (computed on (batch, horizon*output_dim))"""
-        return nn.ModuleDict(
-            {
-                "mse": MeanSquaredError(),
-                "mae": MeanAbsoluteError(),
-                "rmse": MeanSquaredError(squared=False),
-                "r2": R2Score(),
-            }
-        )
+        metrics: Dict[str, Union[Metric, MetricCollection]] = {
+            "mse": MeanSquaredError(),
+            "mae": MeanAbsoluteError(),
+            "rmse": MeanSquaredError(squared=False),
+            "r2": R2Score(),
+        }
+        return MetricCollection(metrics, compute_groups=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass -> (batch, prediction_horizon, output_dim)"""
@@ -170,6 +170,7 @@ class TimeSeriesForecaster(LightningModule):
 
         elif self.architecture == "transformer":
             modules = self.encoder
+            assert isinstance(modules, nn.ModuleDict)
             x = modules["input_proj"](x)  # (batch, seq_len, hidden_dim)
             x = modules["pos_encoding"](x)
             encoded = modules["transformer"](x)  # (batch, seq_len, hidden_dim)
@@ -191,7 +192,7 @@ class TimeSeriesForecaster(LightningModule):
             )
         return forecast_flat, y_flat
 
-    def _shared_step(self, batch: Tuple[torch.Tensor, torch.Tensor], metrics: nn.ModuleDict) -> torch.Tensor:
+    def _shared_step(self, batch: Tuple[torch.Tensor, torch.Tensor], metrics: MetricCollection) -> torch.Tensor:
         x, y = batch
         forecast, y = self._flatten_pair(self(x), y)
 
@@ -204,7 +205,7 @@ class TimeSeriesForecaster(LightningModule):
 
         return loss
 
-    def _log_metrics(self, stage: str, metrics: nn.ModuleDict) -> None:
+    def _log_metrics(self, stage: str, metrics: MetricCollection) -> None:
         for name, metric in metrics.items():
             prog_bar = stage != "test" and name in ("mse", "mae")
             self.log(f"{stage}/{name}", metric, prog_bar=prog_bar, on_step=False, on_epoch=True)
@@ -239,8 +240,9 @@ class TimeSeriesForecaster(LightningModule):
 
         return {"forecast": self(x), "input": x}
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure optimizers and schedulers"""
+        optimizer: Optimizer
         if self.optimizer_name.lower() == "adam":
             optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.optimizer_name.lower() == "adamw":
@@ -248,18 +250,26 @@ class TimeSeriesForecaster(LightningModule):
         else:
             optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        config = {"optimizer": optimizer}
-
+        lr_scheduler: Optional[LRSchedulerConfigType] = None
         if self.scheduler_name.lower() == "onecycle":
-            scheduler = OneCycleLR(
-                optimizer, max_lr=self.learning_rate, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.3
-            )
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "step"}
+            lr_scheduler = {
+                "scheduler": OneCycleLR(
+                    optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=int(self.trainer.estimated_stepping_batches),
+                    pct_start=0.3,
+                ),
+                "interval": "step",
+            }
         elif self.scheduler_name.lower() == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs),
+                "interval": "epoch",
+            }
 
-        return config
+        if lr_scheduler is None:
+            return {"optimizer": optimizer}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
 
     def forecast_multi_step(self, x: torch.Tensor, steps: int) -> torch.Tensor:
         """
@@ -301,6 +311,8 @@ class TimeSeriesForecaster(LightningModule):
 
 class PositionalEncoding(nn.Module):
     """Sinusoidal positional encoding for batch-first inputs ``(batch, seq_len, d_model)``"""
+
+    pe: torch.Tensor
 
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()

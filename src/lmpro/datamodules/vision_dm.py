@@ -4,7 +4,7 @@
 Vision DataModule for image classification and segmentation tasks
 """
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
 
 import torch
 from lightning.pytorch import LightningDataModule
@@ -12,11 +12,15 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from ..data.synth_vision import (
+    SyntheticImageDataset,
+    SyntheticSegmentationDataset,
     VisionDatasetConfig,
     create_synthetic_image_dataset,
     create_synthetic_segmentation_dataset,
 )
 from ..utils.seed import worker_init_fn
+
+VisionDataset = Union[SyntheticImageDataset, SyntheticSegmentationDataset]
 
 
 class VisionDataModule(LightningDataModule):
@@ -61,13 +65,13 @@ class VisionDataModule(LightningDataModule):
         self.test_transforms = test_transforms or self._get_default_test_transforms()
 
         # Datasets (generated in setup(); nothing to download)
-        self.datasets = None
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        self.datasets: Optional[Mapping[str, VisionDataset]] = None
+        self.train_dataset: Optional[VisionDataset] = None
+        self.val_dataset: Optional[VisionDataset] = None
+        self.test_dataset: Optional[VisionDataset] = None
 
         # Data info
-        self.dims = None
+        self.dims: Optional[Tuple[int, ...]] = None
         self.num_classes = self.data_config.num_classes
 
     def _get_default_train_transforms(self) -> transforms.Compose:
@@ -122,6 +126,7 @@ class VisionDataModule(LightningDataModule):
         """Setup datasets for each stage (runs on every process)"""
         if self.datasets is None:
             self._build_datasets()
+        assert self.datasets is not None
 
         if stage == "fit" or stage is None:
             self.train_dataset = self.datasets["train"]
@@ -265,15 +270,16 @@ class VisionDataModule(LightningDataModule):
         # Count class frequencies
         class_counts = torch.zeros(self.num_classes)
 
-        for _, target in self.train_dataset:
+        for index in range(len(self.train_dataset)):
+            _, target = self.train_dataset[index]
             if isinstance(target, torch.Tensor):
                 if target.dim() == 0:  # Single class
-                    class_counts[target.item()] += 1
+                    class_counts[int(target.item())] += 1
                 else:  # Multi-class or one-hot
                     if target.dim() == 1 and len(target) == self.num_classes:
                         class_counts += target
                     else:
-                        class_counts[target.argmax().item()] += 1
+                        class_counts[int(target.argmax().item())] += 1
 
         # Compute inverse frequency weights
         total_samples = class_counts.sum()

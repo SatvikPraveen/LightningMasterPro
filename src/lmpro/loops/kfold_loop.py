@@ -14,7 +14,7 @@ mean/std statistics across folds.
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sized, Tuple, Union, cast
 
 import numpy as np
 import torch
@@ -25,6 +25,13 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 ModelSource = Union[LightningModule, Callable[[], LightningModule]]
 DataSource = Union[Dataset, DataLoader, LightningDataModule]
+# Per-metric summary: ``mean``/``std``/``min``/``max`` floats plus the per-fold ``values`` list.
+SummaryStats = Dict[str, Dict[str, Union[float, List[float]]]]
+
+
+def _dataset_len(dataset: Dataset) -> int:
+    """Length of a map-style dataset (``Dataset`` does not declare ``__len__``)."""
+    return len(cast(Sized, dataset))
 
 
 class KFoldLoop:
@@ -75,7 +82,7 @@ class KFoldLoop:
         self.fold_results: List[Dict[str, Any]] = []
         self.fold_models: List[LightningModule] = []
         self.all_fold_metrics: List[Dict[str, float]] = []
-        self.summary_statistics: Dict[str, Dict[str, float]] = {}
+        self.summary_statistics: SummaryStats = {}
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -87,7 +94,7 @@ class KFoldLoop:
         data: DataSource,
         trainer_kwargs: Optional[Dict[str, Any]] = None,
         test_dataloader: Optional[DataLoader] = None,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> SummaryStats:
         """
         Run k-fold cross-validation.
 
@@ -118,7 +125,7 @@ class KFoldLoop:
             self.results_dir.mkdir(parents=True, exist_ok=True)
 
         rank_zero_info(
-            f"K-Fold CV: {self.num_folds} folds, stratified={self.stratified}, " f"dataset size={len(dataset)}"
+            f"K-Fold CV: {self.num_folds} folds, stratified={self.stratified}, " f"dataset size={_dataset_len(dataset)}"
         )
 
         for fold_idx, (train_indices, val_indices) in enumerate(self.fold_splits):
@@ -191,7 +198,7 @@ class KFoldLoop:
 
     def get_fold_splits(self, dataset: Dataset) -> List[Tuple[np.ndarray, np.ndarray]]:
         """Return the list of ``(train_indices, val_indices)`` for every fold."""
-        n = len(dataset)
+        n = _dataset_len(dataset)
         if self.stratified:
             labels = self._extract_labels(dataset)
             if labels is not None:
@@ -222,7 +229,7 @@ class KFoldLoop:
             return dataset.tensors[-1].cpu().numpy()
 
         labels = []
-        for i in range(len(dataset)):
+        for i in range(_dataset_len(dataset)):
             sample = dataset[i]
             if not isinstance(sample, (tuple, list)) or len(sample) < 2:
                 return None
@@ -260,8 +267,8 @@ class KFoldLoop:
             raise TypeError(f"Unsupported data source: {type(data).__name__}")
 
         # A DataModule may hand us a Subset of a larger dataset; k-fold over it as-is.
-        if len(dataset) < self.num_folds:
-            raise ValueError(f"Dataset has {len(dataset)} samples, fewer than num_folds={self.num_folds}")
+        if _dataset_len(dataset) < self.num_folds:
+            raise ValueError(f"Dataset has {_dataset_len(dataset)} samples, fewer than num_folds={self.num_folds}")
         return dataset, batch_size, num_workers
 
     @staticmethod
@@ -341,7 +348,7 @@ class KFoldLoop:
         with open(fold_file, "w") as f:
             json.dump(_to_serializable(fold_metrics), f, indent=2)
 
-    def _compute_summary_statistics(self) -> Dict[str, Dict[str, float]]:
+    def _compute_summary_statistics(self) -> SummaryStats:
         if not self.all_fold_metrics:
             return {}
 
@@ -351,7 +358,7 @@ class KFoldLoop:
                 if name not in metric_names:
                     metric_names.append(name)
 
-        summary: Dict[str, Dict[str, float]] = {}
+        summary: SummaryStats = {}
         for name in metric_names:
             values = [float(m[name]) for m in self.all_fold_metrics if name in m and isinstance(m[name], (int, float))]
             if values:
@@ -364,7 +371,7 @@ class KFoldLoop:
                 }
         return summary
 
-    def _save_summary_results(self, summary_stats: Dict[str, Dict[str, float]]) -> None:
+    def _save_summary_results(self, summary_stats: SummaryStats) -> None:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         summary_file = self.results_dir / "kfold_summary.json"
         payload = {
@@ -381,7 +388,7 @@ class KFoldLoop:
             json.dump(payload, f, indent=2)
         rank_zero_info(f"K-Fold results saved to {summary_file}")
 
-    def _log_summary(self, summary_stats: Dict[str, Dict[str, float]]) -> None:
+    def _log_summary(self, summary_stats: SummaryStats) -> None:
         rank_zero_info(f"K-FOLD CROSS-VALIDATION SUMMARY ({self.num_folds} folds)")
         for name, stats in summary_stats.items():
             rank_zero_info(
@@ -389,7 +396,7 @@ class KFoldLoop:
                 f"(min: {stats['min']:.4f}, max: {stats['max']:.4f})"
             )
 
-    def get_summary_statistics(self) -> Dict[str, Dict[str, float]]:
+    def get_summary_statistics(self) -> SummaryStats:
         return self._compute_summary_statistics()
 
     def get_best_fold(self, metric_name: str, mode: str = "max") -> Tuple[int, Dict[str, float]]:

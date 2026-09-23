@@ -156,7 +156,7 @@ class SWACallback(Callback):
                 optimizer,
                 swa_lr=swa_lr,
                 anneal_epochs=self.annealing_epochs,
-                anneal_strategy=self.annealing_strategy,
+                anneal_strategy="cos" if self.annealing_strategy == "cos" else "linear",
             )
             self._swa_schedulers.append(scheduler)
             configs.append(LRSchedulerConfig(scheduler, interval="epoch", frequency=1))

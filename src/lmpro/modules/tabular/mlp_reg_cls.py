@@ -4,14 +4,26 @@
 MLP module for tabular regression and classification tasks
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from lightning.pytorch import LightningModule
-from torch.optim import SGD, Adam, AdamW
+from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRScheduler
+from torch.optim import SGD, Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
-from torchmetrics import AUROC, Accuracy, F1Score, MeanAbsoluteError, MeanSquaredError, Precision, R2Score, Recall
+from torchmetrics import (
+    AUROC,
+    Accuracy,
+    F1Score,
+    MeanAbsoluteError,
+    MeanSquaredError,
+    Metric,
+    MetricCollection,
+    Precision,
+    R2Score,
+    Recall,
+)
 
 
 class MLPBlock(nn.Module):
@@ -32,7 +44,7 @@ class MLPBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         if activation == "relu":
-            self.activation = nn.ReLU()
+            self.activation: nn.Module = nn.ReLU()
         elif activation == "gelu":
             self.activation = nn.GELU()
         elif activation == "silu":
@@ -98,7 +110,7 @@ class MLPRegressorClassifier(LightningModule):
 
         # Loss functions
         if task == "classification":
-            self.criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+            self.criterion: nn.Module = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
         elif task == "regression":
             self.criterion = nn.MSELoss()
         else:
@@ -122,10 +134,11 @@ class MLPRegressorClassifier(LightningModule):
 
         return layers
 
-    def _create_metrics(self, stage: str) -> nn.ModuleDict:
+    def _create_metrics(self, stage: str) -> MetricCollection:
         """Create metrics for a specific stage"""
+        metrics: Dict[str, Union[Metric, MetricCollection]]
         if self.task == "classification":
-            task_type = "binary" if self.output_dim == 2 else "multiclass"
+            task_type: Literal["binary", "multiclass"] = "binary" if self.output_dim == 2 else "multiclass"
             metrics = {
                 "accuracy": Accuracy(task=task_type, num_classes=self.output_dim),
             }
@@ -146,7 +159,7 @@ class MLPRegressorClassifier(LightningModule):
                 "r2": R2Score(),
             }
 
-        return nn.ModuleDict(metrics)
+        return MetricCollection(metrics, compute_groups=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass"""
@@ -168,7 +181,7 @@ class MLPRegressorClassifier(LightningModule):
 
         return logits
 
-    def _shared_step(self, batch: Tuple[torch.Tensor, torch.Tensor], metrics: nn.ModuleDict) -> torch.Tensor:
+    def _shared_step(self, batch: Tuple[torch.Tensor, torch.Tensor], metrics: MetricCollection) -> torch.Tensor:
         """Compute loss and update every metric in ``metrics``"""
         x, y = batch
         logits = self(x)
@@ -193,7 +206,7 @@ class MLPRegressorClassifier(LightningModule):
 
         return loss
 
-    def _log_metrics(self, stage: str, metrics: nn.ModuleDict) -> None:
+    def _log_metrics(self, stage: str, metrics: MetricCollection) -> None:
         for name, metric in metrics.items():
             key = f"{stage}/acc" if name == "accuracy" else f"{stage}/{name}"
             prog_bar = stage != "test" and name in ("accuracy", "mse", "r2")
@@ -243,8 +256,9 @@ class MLPRegressorClassifier(LightningModule):
         else:  # regression
             return {"predictions": logits, "logits": logits}
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure optimizers and schedulers"""
+        optimizer: Optimizer
         if self.optimizer_name.lower() == "adam":
             optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.optimizer_name.lower() == "adamw":
@@ -254,22 +268,33 @@ class MLPRegressorClassifier(LightningModule):
         else:
             optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        config = {"optimizer": optimizer}
-
+        lr_scheduler: Optional[LRSchedulerConfigType] = None
         if self.scheduler_name.lower() == "onecycle":
-            scheduler = OneCycleLR(
-                optimizer, max_lr=self.learning_rate, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.3
-            )
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "step"}
+            lr_scheduler = {
+                "scheduler": OneCycleLR(
+                    optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=int(self.trainer.estimated_stepping_batches),
+                    pct_start=0.3,
+                ),
+                "interval": "step",
+            }
         elif self.scheduler_name.lower() == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs),
+                "interval": "epoch",
+            }
         elif self.scheduler_name.lower() == "plateau":
             monitor = "val/acc" if self.task == "classification" else "val/r2"
-            scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5)
-            config["lr_scheduler"] = {"scheduler": scheduler, "monitor": monitor, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5),
+                "monitor": monitor,
+                "interval": "epoch",
+            }
 
-        return config
+        if lr_scheduler is None:
+            return {"optimizer": optimizer}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
 
     def get_feature_importance(self, x: torch.Tensor) -> torch.Tensor:
         """Compute feature importance using gradients"""

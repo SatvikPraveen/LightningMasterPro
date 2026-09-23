@@ -4,16 +4,17 @@
 Vision classifier module for image classification tasks
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from torch.optim import SGD, Adam, AdamW
+from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRScheduler
+from torch.optim import SGD, Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
-from torchmetrics import AUROC, Accuracy, F1Score, Precision, Recall
+from torchmetrics import AUROC, Accuracy, F1Score, Metric, MetricCollection, Precision, Recall
 
 from ...utils.metrics import log_confusion_matrix
 
@@ -38,7 +39,7 @@ class ConvBlock(nn.Module):
         self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
 
         if activation == "relu":
-            self.activation = nn.ReLU(inplace=True)
+            self.activation: nn.Module = nn.ReLU(inplace=True)
         elif activation == "gelu":
             self.activation = nn.GELU()
         elif activation == "silu":
@@ -65,7 +66,7 @@ class ResidualBlock(nn.Module):
 
         # Skip connection
         if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
+            self.shortcut: nn.Module = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1, stride, bias=False), nn.BatchNorm2d(out_channels)
             )
         else:
@@ -121,7 +122,7 @@ class VisionClassifier(LightningModule):
 
         # Build model
         self.backbone = self._build_backbone(hidden_dims, dropout)
-        self.classifier = self._build_classifier()
+        self.classifier = self._build_classifier(hidden_dims[-1], dropout)
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
@@ -172,20 +173,20 @@ class VisionClassifier(LightningModule):
 
         return nn.Sequential(*layers)
 
-    def _build_classifier(self) -> nn.Module:
+    def _build_classifier(self, feature_dim: int, dropout: float) -> nn.Module:
         """Build the classification head"""
         return nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Dropout(self.hparams.dropout),
-            nn.Linear(self.hparams.hidden_dims[-1], self.num_classes),
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, self.num_classes),
         )
 
-    def _create_metrics(self, stage: str) -> nn.ModuleDict:
+    def _create_metrics(self, stage: str) -> MetricCollection:
         """Create metrics for a specific stage"""
-        task = "binary" if self.num_classes == 2 else "multiclass"
+        task: Literal["binary", "multiclass"] = "binary" if self.num_classes == 2 else "multiclass"
 
-        metrics = {
+        metrics: Dict[str, Union[Metric, MetricCollection]] = {
             "accuracy": Accuracy(task=task, num_classes=self.num_classes),
         }
 
@@ -200,9 +201,9 @@ class VisionClassifier(LightningModule):
             if self.num_classes > 2:
                 metrics["auroc"] = AUROC(task=task, num_classes=self.num_classes, average="macro")
 
-        return nn.ModuleDict(metrics)
+        return MetricCollection(metrics, compute_groups=False)
 
-    def _update_metrics(self, metrics: nn.ModuleDict, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def _update_metrics(self, metrics: MetricCollection, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Update every metric in ``metrics`` and return hard predictions"""
         preds = torch.argmax(logits, dim=1)
         for name, metric in metrics.items():
@@ -214,7 +215,7 @@ class VisionClassifier(LightningModule):
                 metric.update(preds, y)
         return preds
 
-    def _log_metrics(self, stage: str, metrics: nn.ModuleDict) -> None:
+    def _log_metrics(self, stage: str, metrics: MetricCollection) -> None:
         """Log every metric object so Lightning computes and resets it per epoch"""
         for name, metric in metrics.items():
             key = f"{stage}/acc" if name == "accuracy" else f"{stage}/{name}"
@@ -333,9 +334,9 @@ class VisionClassifier(LightningModule):
 
         return {"predictions": predictions, "probabilities": probabilities, "logits": logits}
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure optimizers and learning rate schedulers"""
-        # Optimizer
+        optimizer: Optimizer
         if self.optimizer_name.lower() == "adam":
             optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.optimizer_name.lower() == "adamw":
@@ -345,26 +346,33 @@ class VisionClassifier(LightningModule):
         else:
             optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        # Scheduler
-        config = {"optimizer": optimizer}
-
+        lr_scheduler: Optional[LRSchedulerConfigType] = None
         if self.scheduler_name.lower() == "onecycle":
-            scheduler = OneCycleLR(
-                optimizer,
-                max_lr=self.learning_rate,
-                total_steps=self.trainer.estimated_stepping_batches,
-                pct_start=0.3,
-                anneal_strategy="cos",
-            )
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "step"}
+            lr_scheduler = {
+                "scheduler": OneCycleLR(
+                    optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=int(self.trainer.estimated_stepping_batches),
+                    pct_start=0.3,
+                    anneal_strategy="cos",
+                ),
+                "interval": "step",
+            }
         elif self.scheduler_name.lower() == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs),
+                "interval": "epoch",
+            }
         elif self.scheduler_name.lower() == "plateau":
-            scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5)
-            config["lr_scheduler"] = {"scheduler": scheduler, "monitor": "val/acc", "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5),
+                "monitor": "val/acc",
+                "interval": "epoch",
+            }
 
-        return config
+        if lr_scheduler is None:
+            return {"optimizer": optimizer}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
 
     def get_model_size(self) -> Dict[str, int]:
         """Get model size information"""

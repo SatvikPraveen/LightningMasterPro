@@ -4,7 +4,7 @@
 Tabular DataModule for regression and classification with structured data
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 import torch
@@ -12,6 +12,7 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader
 
 from ..data.synth_tabular import (
+    TabularDataset,
     TabularDatasetConfig,
     create_synthetic_tabular_dataset,
 )
@@ -53,15 +54,15 @@ class TabularDataModule(LightningDataModule):
         self.data_config = data_config or TabularDatasetConfig()
 
         # Datasets (generated in setup(); nothing to download)
-        self.datasets = None
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        self.datasets: Optional[Mapping[str, TabularDataset]] = None
+        self.train_dataset: Optional[TabularDataset] = None
+        self.val_dataset: Optional[TabularDataset] = None
+        self.test_dataset: Optional[TabularDataset] = None
 
         # Feature info
         self.num_features = self.data_config.num_features
         self.num_classes = self.data_config.num_classes if task == "classification" else None
-        self.feature_names = None
+        self.feature_names: Optional[List[str]] = None
         self.scaler = None
 
     def prepare_data(self) -> None:
@@ -81,6 +82,7 @@ class TabularDataModule(LightningDataModule):
         """Setup datasets for each stage (runs on every process)"""
         if self.datasets is None:
             self._build_datasets()
+        assert self.datasets is not None
 
         if stage == "fit" or stage is None:
             self.train_dataset = self.datasets["train"]
@@ -267,9 +269,10 @@ class TabularDataModule(LightningDataModule):
         # Count class frequencies
         class_counts = torch.zeros(self.num_classes)
 
-        for _, target in self.train_dataset:
+        for index in range(len(self.train_dataset)):
+            _, target = self.train_dataset[index]
             if isinstance(target, torch.Tensor):
-                class_counts[target.item()] += 1
+                class_counts[int(target.item())] += 1
 
         # Compute inverse frequency weights
         total_samples = class_counts.sum()
@@ -277,8 +280,8 @@ class TabularDataModule(LightningDataModule):
 
         return class_weights
 
-    def get_feature_importance_data(self) -> Dict[str, torch.Tensor]:
-        """Get data for feature importance analysis"""
+    def get_feature_importance_data(self) -> Dict[str, Any]:
+        """Get data for feature importance analysis (feature tensors plus their names)"""
         if self.train_dataset is None:
             return {}
 
@@ -286,7 +289,8 @@ class TabularDataModule(LightningDataModule):
         all_features = []
         all_targets = []
 
-        for features, target in self.train_dataset:
+        for index in range(len(self.train_dataset)):
+            features, target = self.train_dataset[index]
             if features.dim() == 2:  # Time-varying data - use last timestep
                 features = features[-1]
             all_features.append(features)
@@ -305,9 +309,8 @@ class TabularDataModule(LightningDataModule):
         samples = []
         targets = []
 
-        for i, (features, target) in enumerate(self.train_dataset):
-            if i >= num_samples:
-                break
+        for i in range(min(num_samples, len(self.train_dataset))):
+            features, target = self.train_dataset[i]
 
             if features.dim() == 2:  # Time-varying data
                 features = features[-1]  # Last timestep

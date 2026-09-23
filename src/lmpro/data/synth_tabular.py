@@ -5,7 +5,7 @@ Synthetic tabular data generation for regression and classification tasks
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Sized, Tuple, Union, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -216,15 +216,15 @@ class ComplexTabularDataset(Dataset):
 
             # Convert to classes
             percentiles = np.percentile(target_score, [33, 67])
-            target = np.digitize(target_score, percentiles)
-            df["target"] = target
+            class_target = np.digitize(target_score, percentiles)
+            df["target"] = class_target
         else:  # regression
             # Create continuous target
-            target = 0
+            reg_target = np.zeros(len(df), dtype=np.float64)
             for col in df.select_dtypes(include=[np.number]).columns[:5]:
-                target += df[col].values * np.random.uniform(-2, 2)
-            target += np.random.normal(0, self.config.noise_level, len(target))
-            df["target"] = target
+                reg_target += df[col].values * np.random.uniform(-2, 2)
+            reg_target += np.random.normal(0, self.config.noise_level, len(reg_target))
+            df["target"] = reg_target
 
         # Add missing values
         if self.include_missing:
@@ -321,6 +321,7 @@ class TimeVaryingTabularDataset(Dataset):
             sequences.append(sequence)
 
             # Generate target based on sequence statistics
+            target: float
             if self.task == "classification":
                 # Use mean and trend as features for classification
                 mean_values = np.mean(sequence, axis=0)
@@ -329,7 +330,7 @@ class TimeVaryingTabularDataset(Dataset):
                 target = 0 if target_score < -0.5 else 1 if target_score < 0.5 else 2
             else:  # regression
                 # Use sequence statistics for regression
-                target = np.sum(np.mean(sequence, axis=0)) + np.random.normal(0, 0.1)
+                target = float(np.sum(np.mean(sequence, axis=0)) + np.random.normal(0, 0.1))
 
             targets.append(target)
 
@@ -342,15 +343,18 @@ class TimeVaryingTabularDataset(Dataset):
         return self.sequences_tensor[idx], self.targets_tensor[idx]
 
 
+TabularDataset = Union[SyntheticTabularDataset, ComplexTabularDataset, TimeVaryingTabularDataset]
+
+
 def create_synthetic_tabular_dataset(
     config: TabularDatasetConfig,
     task: str = "classification",
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
     dataset_type: str = "simple",
-) -> dict:
+) -> Dict[str, TabularDataset]:
     """Create synthetic tabular datasets"""
-    datasets = {}
+    datasets: Dict[str, TabularDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -403,8 +407,8 @@ def visualize_tabular_data(dataset: Dataset, save_path: Optional[str] = None) ->
         df = dataset.get_pandas_dataframe()
     else:
         # Convert from tensor data
-        X = dataset.X_tensor.numpy()
-        y = dataset.y_tensor.numpy()
+        X = getattr(dataset, "X_tensor").numpy()
+        y = getattr(dataset, "y_tensor").numpy()
         feature_names = getattr(dataset, "feature_names", [f"feature_{i}" for i in range(X.shape[1])])
 
         df = pd.DataFrame(X, columns=feature_names)
@@ -420,7 +424,7 @@ def visualize_tabular_data(dataset: Dataset, save_path: Optional[str] = None) ->
     axes[0, 0].set_title("Feature Correlation Matrix")
 
     # Target distribution
-    if dataset.task == "classification":
+    if getattr(dataset, "task") == "classification":
         df["target"].value_counts().plot(kind="bar", ax=axes[0, 1])
         axes[0, 1].set_title("Class Distribution")
     else:
@@ -449,13 +453,13 @@ def analyze_dataset_quality(dataset: Dataset) -> Dict[str, float]:
     if hasattr(dataset, "get_pandas_dataframe"):
         df = dataset.get_pandas_dataframe()
     else:
-        X = dataset.X_tensor.numpy()
-        y = dataset.y_tensor.numpy()
+        X = getattr(dataset, "X_tensor").numpy()
+        y = getattr(dataset, "y_tensor").numpy()
         feature_names = getattr(dataset, "feature_names", [f"feature_{i}" for i in range(X.shape[1])])
         df = pd.DataFrame(X, columns=feature_names)
         df["target"] = y
 
-    analysis = {}
+    analysis: Dict[str, float] = {}
 
     # Basic statistics
     analysis["num_samples"] = len(df)
@@ -485,7 +489,7 @@ def analyze_dataset_quality(dataset: Dataset) -> Dict[str, float]:
 def print_dataset_summary(dataset: Dataset, name: str = "Dataset") -> None:
     """Print summary statistics for the dataset"""
     print(f"\n{name} Summary:")
-    print(f"Length: {len(dataset)}")
+    print(f"Length: {len(cast(Sized, dataset))}")
 
     analysis = analyze_dataset_quality(dataset)
     for key, value in analysis.items():

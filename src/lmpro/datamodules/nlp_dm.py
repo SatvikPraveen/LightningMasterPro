@@ -4,7 +4,7 @@
 NLP DataModule for text classification and language modeling tasks
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -14,12 +14,17 @@ from torch.utils.data import DataLoader
 
 from ..data.synth_nlp import (
     PAD_TOKEN_ID,
+    CharacterLevelDataset,
     NLPDatasetConfig,
+    SentimentDataset,
+    SyntheticTextDataset,
     create_character_level_dataset,
     create_synthetic_sentiment_dataset,
     create_synthetic_text_dataset,
 )
 from ..utils.seed import worker_init_fn
+
+NLPDataset = Union[SyntheticTextDataset, SentimentDataset, CharacterLevelDataset]
 
 
 class NLPDataModule(LightningDataModule):
@@ -58,17 +63,17 @@ class NLPDataModule(LightningDataModule):
             self.data_config.max_sequence_length = max_length
 
         # Datasets (generated in setup(); nothing to download)
-        self.datasets = None
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        self.datasets: Optional[Mapping[str, NLPDataset]] = None
+        self.train_dataset: Optional[NLPDataset] = None
+        self.val_dataset: Optional[NLPDataset] = None
+        self.test_dataset: Optional[NLPDataset] = None
 
         # Vocabulary info
         self.vocab_size = self.data_config.vocab_size
         self.pad_token_id = PAD_TOKEN_ID
-        self.vocab = None
-        self.word_to_idx = None
-        self.idx_to_word = None
+        self.vocab: Optional[List[str]] = None
+        self.word_to_idx: Optional[Dict[str, int]] = None
+        self.idx_to_word: Optional[Dict[int, str]] = None
 
     def prepare_data(self) -> None:
         """Nothing to download: synthetic data is generated in-memory in setup()"""
@@ -97,6 +102,7 @@ class NLPDataModule(LightningDataModule):
         """Setup datasets for each stage (runs on every process)"""
         if self.datasets is None:
             self._build_datasets()
+        assert self.datasets is not None
 
         if stage == "fit" or stage is None:
             self.train_dataset = self.datasets["train"]
@@ -112,7 +118,9 @@ class NLPDataModule(LightningDataModule):
                 self.idx_to_word = self.train_dataset.idx_to_word
             if hasattr(self.train_dataset, "char_to_idx"):
                 self.word_to_idx = self.train_dataset.char_to_idx
+            if hasattr(self.train_dataset, "idx_to_char"):
                 self.idx_to_word = self.train_dataset.idx_to_char
+            if hasattr(self.train_dataset, "chars"):
                 self.vocab_size = len(self.train_dataset.chars)
 
         if stage == "test" or stage is None:
@@ -124,16 +132,15 @@ class NLPDataModule(LightningDataModule):
 
     def collate_fn(self, batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Custom collate function for variable length sequences"""
-        sequences, targets = zip(*batch)
+        seqs, tgts = zip(*batch)
 
         if self.task == "language_modeling":
             # For language modeling, sequences are already the same length
-            sequences = torch.stack(sequences)
-            targets = torch.stack(targets)
+            sequences = torch.stack(list(seqs))
         else:
             # For classification tasks, pad sequences
-            sequences = pad_sequence(sequences, batch_first=True, padding_value=self.pad_token_id)
-            targets = torch.stack(targets)
+            sequences = pad_sequence(list(seqs), batch_first=True, padding_value=self.pad_token_id)
+        targets = torch.stack(list(tgts))
 
         return sequences, targets
 
@@ -282,9 +289,10 @@ class NLPDataModule(LightningDataModule):
         # Count class frequencies
         class_counts = torch.zeros(self.data_config.num_classes)
 
-        for _, target in self.train_dataset:
+        for index in range(len(self.train_dataset)):
+            _, target = self.train_dataset[index]
             if isinstance(target, torch.Tensor):
-                class_counts[target.item()] += 1
+                class_counts[int(target.item())] += 1
 
         # Compute inverse frequency weights
         total_samples = class_counts.sum()

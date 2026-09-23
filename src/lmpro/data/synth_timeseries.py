@@ -5,7 +5,7 @@ Synthetic time series data generation for forecasting and classification tasks
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Sized, Tuple, Union, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -144,8 +144,8 @@ class SyntheticTimeSeriesDataset(Dataset):
                 seq_mean = np.mean(seq, axis=0)
                 seq_trend = seq[-1] - seq[0]
                 target_score = np.sum(seq_mean) + np.sum(seq_trend)
-                target = 0 if target_score < -0.5 else 1 if target_score < 0.5 else 2
-                target = np.array([target])
+                label = 0 if target_score < -0.5 else 1 if target_score < 0.5 else 2
+                target = np.array([label])
 
             sequences.append(seq)
             targets.append(target)
@@ -255,12 +255,12 @@ class MultiVariateTimeSeriesDataset(Dataset):
                     [np.mean(seq, axis=0), np.std(seq, axis=0), seq[-1] - seq[0]]  # Trend for each feature
                 )
                 target_score = np.sum(seq_stats)
-                target = (
+                label = (
                     0
                     if target_score < np.percentile(seq_stats, 33)
                     else 1 if target_score < np.percentile(seq_stats, 67) else 2
                 )
-                target = np.array([target])
+                target = np.array([label])
 
             sequences.append(seq)
             targets.append(target)
@@ -372,15 +372,18 @@ class AnomalyTimeSeriesDataset(Dataset):
         return self.sequences_tensor[idx], self.targets_tensor[idx]
 
 
+TimeSeriesDataset = Union[SyntheticTimeSeriesDataset, MultiVariateTimeSeriesDataset, AnomalyTimeSeriesDataset]
+
+
 def create_synthetic_timeseries_dataset(
     config: TimeSeriesDatasetConfig,
     task: str = "forecasting",
     dataset_type: str = "univariate",
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, TimeSeriesDataset]:
     """Create synthetic time series datasets"""
-    datasets = {}
+    datasets: Dict[str, TimeSeriesDataset] = {}
 
     total_samples = config.num_samples
     split_sizes = [int(ratio * total_samples) for ratio in split_ratios]
@@ -413,8 +416,8 @@ def create_synthetic_forecasting_dataset(
     config: TimeSeriesDatasetConfig,
     dataset_type: str = "univariate",
     splits: List[str] = ["train", "val", "test"],
-    split_ratios: List[float] = [0.7, 0.15, 0.15],
-) -> dict:
+    split_ratios: Sequence[float] = [0.7, 0.15, 0.15],
+) -> Dict[str, TimeSeriesDataset]:
     """Create synthetic forecasting datasets"""
     return create_synthetic_timeseries_dataset(
         config, task="forecasting", dataset_type=dataset_type, splits=splits, split_ratios=split_ratios
@@ -459,7 +462,7 @@ def visualize_timeseries_data(dataset: Dataset, num_samples: int = 3, save_path:
 def analyze_timeseries_properties(dataset: Dataset) -> Dict[str, float]:
     """Analyze statistical properties of time series dataset"""
     # Sample some sequences
-    sample_size = min(100, len(dataset))
+    sample_size = min(100, len(cast(Sized, dataset)))
     sequences = []
     targets = []
 
@@ -468,22 +471,22 @@ def analyze_timeseries_properties(dataset: Dataset) -> Dict[str, float]:
         sequences.append(seq.numpy())
         targets.append(target.numpy())
 
-    sequences = np.array(sequences)
+    seq_array = np.array(sequences)
 
-    analysis = {}
+    analysis: Dict[str, float] = {}
 
     # Basic statistics
-    analysis["mean_sequence_length"] = sequences.shape[1]
-    analysis["num_features"] = sequences.shape[2] if sequences.ndim == 3 else 1
-    analysis["mean_value"] = np.mean(sequences)
-    analysis["std_value"] = np.std(sequences)
+    analysis["mean_sequence_length"] = seq_array.shape[1]
+    analysis["num_features"] = seq_array.shape[2] if seq_array.ndim == 3 else 1
+    analysis["mean_value"] = float(np.mean(seq_array))
+    analysis["std_value"] = float(np.std(seq_array))
 
     # Stationarity (simplified test)
-    if sequences.ndim == 3:
+    if seq_array.ndim == 3:
         # For multivariate, test first feature
-        first_feature = sequences[:, :, 0].flatten()
+        first_feature = seq_array[:, :, 0].flatten()
     else:
-        first_feature = sequences.flatten()
+        first_feature = seq_array.flatten()
 
     # Simple stationarity indicator (variance of rolling mean)
     window_size = min(10, len(first_feature) // 10)
@@ -491,14 +494,14 @@ def analyze_timeseries_properties(dataset: Dataset) -> Dict[str, float]:
         rolling_means = []
         for i in range(len(first_feature) - window_size + 1):
             rolling_means.append(np.mean(first_feature[i : i + window_size]))
-        analysis["stationarity_indicator"] = np.std(rolling_means)
+        analysis["stationarity_indicator"] = float(np.std(rolling_means))
 
     # Seasonality detection (basic)
     if len(first_feature) > 24:
         autocorr_12 = np.corrcoef(first_feature[:-12], first_feature[12:])[0, 1]
         autocorr_24 = np.corrcoef(first_feature[:-24], first_feature[24:])[0, 1]
-        analysis["seasonality_12"] = autocorr_12
-        analysis["seasonality_24"] = autocorr_24
+        analysis["seasonality_12"] = float(autocorr_12)
+        analysis["seasonality_24"] = float(autocorr_24)
 
     return analysis
 
@@ -506,7 +509,7 @@ def analyze_timeseries_properties(dataset: Dataset) -> Dict[str, float]:
 def print_timeseries_summary(dataset: Dataset, name: str = "Time Series Dataset") -> None:
     """Print summary of time series dataset"""
     print(f"\n{name} Summary:")
-    print(f"Length: {len(dataset)}")
+    print(f"Length: {len(cast(Sized, dataset))}")
 
     sample_seq, sample_target = dataset[0]
     print(f"Sequence shape: {sample_seq.shape}")

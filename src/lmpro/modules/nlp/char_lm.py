@@ -4,12 +4,13 @@
 Character-level language model for text generation
 """
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from lightning.pytorch import LightningModule
-from torch.optim import Adam, AdamW
+from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRScheduler
+from torch.optim import Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
 from torchmetrics import MeanMetric
 
@@ -58,7 +59,7 @@ class CharacterLanguageModel(LightningModule):
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=self.pad_token_id)
 
         if rnn_type.lower() == "lstm":
-            self.rnn = nn.LSTM(
+            self.rnn: nn.Module = nn.LSTM(
                 embedding_dim, hidden_dim, num_layers, dropout=dropout if num_layers > 1 else 0, batch_first=True
             )
         elif rnn_type.lower() == "gru":
@@ -227,8 +228,9 @@ class CharacterLanguageModel(LightningModule):
             self.train()
         return generated
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure optimizers and schedulers"""
+        optimizer: Optimizer
         if self.optimizer_name.lower() == "adam":
             optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.optimizer_name.lower() == "adamw":
@@ -236,18 +238,26 @@ class CharacterLanguageModel(LightningModule):
         else:
             optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        config = {"optimizer": optimizer}
-
+        lr_scheduler: Optional[LRSchedulerConfigType] = None
         if self.scheduler_name.lower() == "onecycle":
-            scheduler = OneCycleLR(
-                optimizer, max_lr=self.learning_rate, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.3
-            )
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "step"}
+            lr_scheduler = {
+                "scheduler": OneCycleLR(
+                    optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=int(self.trainer.estimated_stepping_batches),
+                    pct_start=0.3,
+                ),
+                "interval": "step",
+            }
         elif self.scheduler_name.lower() == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs),
+                "interval": "epoch",
+            }
 
-        return config
+        if lr_scheduler is None:
+            return {"optimizer": optimizer}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
 
     def on_before_optimizer_step(self, optimizer) -> None:
         """Gradient clipping"""

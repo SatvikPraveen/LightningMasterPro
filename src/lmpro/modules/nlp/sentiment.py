@@ -4,15 +4,16 @@
 Sentiment classification module for text sentiment analysis
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from torch.optim import Adam, AdamW
+from lightning.pytorch.utilities.types import LRSchedulerConfigType, OptimizerLRScheduler
+from torch.optim import Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
-from torchmetrics import AUROC, Accuracy, F1Score, Precision, Recall
+from torchmetrics import AUROC, Accuracy, F1Score, Metric, MetricCollection, Precision, Recall
 
 
 class SentimentClassifier(LightningModule):
@@ -64,7 +65,7 @@ class SentimentClassifier(LightningModule):
         self.dropout = nn.Dropout(dropout)
 
         if architecture == "lstm":
-            self.encoder = nn.LSTM(
+            self.encoder: nn.Module = nn.LSTM(
                 embedding_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0
             )
             self.classifier = nn.Linear(hidden_dim, num_classes)
@@ -86,7 +87,7 @@ class SentimentClassifier(LightningModule):
         self.criterion = nn.CrossEntropyLoss(weight=class_weights)
 
         # Metrics: every object is handed to self.log so Lightning resets it per epoch.
-        task = "binary" if num_classes == 2 else "multiclass"
+        task: Literal["binary", "multiclass"] = "binary" if num_classes == 2 else "multiclass"
         self.train_metrics = self._create_metrics("train", task)
         self.val_metrics = self._create_metrics("val", task)
         self.test_metrics = self._create_metrics("test", task)
@@ -121,9 +122,9 @@ class SentimentClassifier(LightningModule):
             ]
         )
 
-    def _create_metrics(self, stage: str, task: str) -> nn.ModuleDict:
+    def _create_metrics(self, stage: str, task: Literal["binary", "multiclass"]) -> MetricCollection:
         """Create metrics for a specific stage"""
-        metrics = {
+        metrics: Dict[str, Union[Metric, MetricCollection]] = {
             "accuracy": Accuracy(task=task, num_classes=self.num_classes),
         }
 
@@ -138,7 +139,7 @@ class SentimentClassifier(LightningModule):
             if self.num_classes > 2:
                 metrics["auroc"] = AUROC(task=task, num_classes=self.num_classes, average="macro")
 
-        return nn.ModuleDict(metrics)
+        return MetricCollection(metrics, compute_groups=False)
 
     def _build_mask(self, x: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -187,7 +188,9 @@ class SentimentClassifier(LightningModule):
             features = self.dropout(last_hidden)
 
         elif self.architecture == "cnn":
+            assert isinstance(self.encoder, nn.ModuleList)
             conv_layers, dropout_layer = self.encoder
+            assert isinstance(conv_layers, nn.ModuleList)
 
             # Transpose for conv1d: (batch, embed_dim, seq_len)
             embedded = embedded.transpose(1, 2)
@@ -202,6 +205,7 @@ class SentimentClassifier(LightningModule):
             features = dropout_layer(features)
 
         elif self.architecture == "attention":
+            assert isinstance(self.encoder, nn.ModuleList)
             attn_layer, norm_layer, linear_layer, relu_layer, dropout_layer = self.encoder
 
             # key_padding_mask is True for positions that must be ignored
@@ -219,7 +223,7 @@ class SentimentClassifier(LightningModule):
         logits = self.classifier(features)
         return logits
 
-    def _update_metrics(self, metrics: nn.ModuleDict, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def _update_metrics(self, metrics: MetricCollection, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         preds = torch.argmax(logits, dim=1)
         for name, metric in metrics.items():
             if name == "auroc" and self.num_classes > 2:
@@ -230,7 +234,7 @@ class SentimentClassifier(LightningModule):
                 metric.update(preds, y)
         return preds
 
-    def _log_metrics(self, stage: str, metrics: nn.ModuleDict) -> None:
+    def _log_metrics(self, stage: str, metrics: MetricCollection) -> None:
         for name, metric in metrics.items():
             key = f"{stage}/acc" if name == "accuracy" else f"{stage}/{name}"
             self.log(key, metric, prog_bar=(name == "accuracy"), on_step=False, on_epoch=True)
@@ -287,8 +291,9 @@ class SentimentClassifier(LightningModule):
 
         return {"predictions": predictions, "probabilities": probabilities, "logits": logits}
 
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure optimizers and schedulers"""
+        optimizer: Optimizer
         if self.optimizer_name.lower() == "adam":
             optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.optimizer_name.lower() == "adamw":
@@ -296,21 +301,32 @@ class SentimentClassifier(LightningModule):
         else:
             optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        config = {"optimizer": optimizer}
-
+        lr_scheduler: Optional[LRSchedulerConfigType] = None
         if self.scheduler_name.lower() == "onecycle":
-            scheduler = OneCycleLR(
-                optimizer, max_lr=self.learning_rate, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.3
-            )
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "step"}
+            lr_scheduler = {
+                "scheduler": OneCycleLR(
+                    optimizer,
+                    max_lr=self.learning_rate,
+                    total_steps=int(self.trainer.estimated_stepping_batches),
+                    pct_start=0.3,
+                ),
+                "interval": "step",
+            }
         elif self.scheduler_name.lower() == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-            config["lr_scheduler"] = {"scheduler": scheduler, "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs),
+                "interval": "epoch",
+            }
         elif self.scheduler_name.lower() == "plateau":
-            scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5)
-            config["lr_scheduler"] = {"scheduler": scheduler, "monitor": "val/acc", "interval": "epoch"}
+            lr_scheduler = {
+                "scheduler": ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5),
+                "monitor": "val/acc",
+                "interval": "epoch",
+            }
 
-        return config
+        if lr_scheduler is None:
+            return {"optimizer": optimizer}
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler}
 
     def get_sentiment_labels(self) -> List[str]:
         """Get sentiment labels"""
