@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 120
+target-version = ["py39", "py310", "py311", "py312"]
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | build
+  | dist
+  | notebooks
+  | docs/_build
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["lmpro"]
+skip_gitignore = true
+extend_skip = ["notebooks", "docs/_build"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    "ignore::UserWarning:torchmetrics",
+    "ignore:.*FigureCanvasAgg is non-interactive.*:UserWarning",
+]
+markers = [
+    "slow: tests that train for more than a handful of steps",
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_strict_optional = true
+exclude = ["notebooks/", "docs/", "build/"]
+
+[tool.coverage.run]
+source = ["lmpro"]
+branch = true

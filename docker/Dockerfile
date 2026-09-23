@@ -1,31 +1,23 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# CPU-only torch keeps the image small; swap the index URL for a CUDA build if needed.
+COPY requirements.txt setup.py pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && pip install --no-cache-dir -e ".[export,notebooks]"
 
-# Copy the entire project
+# Copy the rest of the project (configs, scripts, notebooks). .dockerignore excludes .git, logs, checkpoints.
 COPY . .
 
-# Install the package in development mode
-RUN pip install -e .
+ENV PYTHONUNBUFFERED=1 \
+    TORCH_HOME=/app/.torch
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV TORCH_HOME=/app/.torch
+RUN mkdir -p logs checkpoints data/synthetic
 
-# Create necessary directories
-RUN mkdir -p logs models data/synthetic
-
-# Default command (can be overridden)
-CMD ["python", "--version"]
+CMD ["python", "scripts/train.py", "--help"]

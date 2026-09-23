@@ -157,3 +157,15 @@ data/external/
 .Trashes
 ehthumbs.db
 Thumbs.db
+# LightningMasterPro script outputs
+predictions/
+ablation_results/
+lr_finder_results/
+batch_scale_results/
+benchmark_results/
+evaluation_results/
+exports/
+data/synthetic/*.pt
+data/synthetic/*.npz
+.torch/
+config.yaml

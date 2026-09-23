@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 # -- Project information ──────────────────────────────────────────────────────
 project = "LightningMasterPro"
-copyright = "2024, LightningMasterPro Contributors"
-author = "LightningMasterPro Contributors"
-release = "0.1.0"
+copyright = "2026, Satvik Praveen"
+author = "Satvik Praveen"
+release = "0.2.0"
 
 # -- General configuration ────────────────────────────────────────────────────
 extensions = [
@@ -24,27 +24,11 @@ extensions = [
     "sphinx.ext.coverage",
 ]
 
-templates_path = ["_templates"]
+templates_path = []
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-# Mock heavy C-extension dependencies so autodoc works without a full install
-autodoc_mock_imports = [
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "lightning",
-    "pytorch_lightning",
-    "torchmetrics",
-    "numpy",
-    "pandas",
-    "sklearn",
-    "matplotlib",
-    "seaborn",
-    "PIL",
-    "onnx",
-    "onnxruntime",
-    "shap",
-]
+# The docs job installs the package with its real dependencies, so nothing is mocked.
+autodoc_mock_imports = []
 
 # Autosummary generates stubs automatically
 autosummary_generate = True
@@ -69,7 +53,7 @@ intersphinx_mapping = {
 
 # -- Options for HTML output ──────────────────────────────────────────────────
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = []
 html_theme_options = {
     "navigation_depth": 4,
     "collapse_navigation": False,

@@ -1,44 +1,25 @@
 LightningMasterPro Documentation
 ==================================
 
-Welcome to **LightningMasterPro** — a comprehensive, hands-on PyTorch Lightning
-learning framework covering fundamentals through advanced distributed training.
+**LightningMasterPro** is a hands-on PyTorch Lightning learning framework. It pairs
+20 educational notebooks with a small, fully tested library (``lmpro``) that shows
+the idiomatic Lightning 2.x way to build modules, datamodules, callbacks, custom
+training drivers and a ``LightningCLI``.
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Getting Started
+Quick start
+-----------
 
-   getting_started/installation
-   getting_started/quickstart
-   getting_started/project_structure
+.. code-block:: bash
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Core Concepts
-
-   concepts/lightning_modules
-   concepts/datamodules
-   concepts/callbacks
-   concepts/loops
+   pip install -e ".[dev,export]"
+   python scripts/train.py fit --config configs/vision/classifier.yaml
+   lmpro fit --config configs/nlp/sentiment.yaml --trainer.max_epochs 3
 
 .. toctree::
    :maxdepth: 2
    :caption: API Reference
 
    api/modules
-   api/datamodules
-   api/callbacks
-   api/loops
-   api/utils
-   api/data
-   api/cli
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Development
-
-   contributing
-   changelog
 
 
 Indices and tables

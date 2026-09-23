@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   lmpro:
     build:
@@ -10,13 +8,11 @@ services:
     volumes:
       - ../data:/app/data
       - ../logs:/app/logs
-      - ../models:/app/models
-      - ../notebooks:/app/notebooks
+      - ../checkpoints:/app/checkpoints
     environment:
       - PYTHONUNBUFFERED=1
-      - CUDA_VISIBLE_DEVICES=0
-    command: python scripts/train.py --help
-    
+    command: python scripts/train.py fit --config configs/vision/classifier.yaml --trainer.max_epochs 1
+
   lmpro-jupyter:
     build:
       context: ..
@@ -28,12 +24,12 @@ services:
     volumes:
       - ../data:/app/data
       - ../logs:/app/logs
-      - ../models:/app/models
+      - ../checkpoints:/app/checkpoints
       - ../notebooks:/app/notebooks
     environment:
       - PYTHONUNBUFFERED=1
-    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
-    
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app/notebooks
+
   lmpro-dev:
     build:
       context: ..
