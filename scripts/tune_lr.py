@@ -1,133 +1,88 @@
 # scripts/tune_lr.py
-"""Script for finding optimal learning rates using Lightning's LR finder."""
+"""Learning-rate range test with ``lightning.pytorch.tuner.Tuner.lr_find``.
 
-import sys
-from pathlib import Path
+Usage::
+
+    python scripts/tune_lr.py --config configs/vision/classifier.yaml \
+        [--tuning_config configs/tuning/lr_finder.yaml] [--output_dir lr_finder_results]
+
+The ``lr_finder`` section of the tuning config is passed verbatim to ``Tuner.lr_find``.
+Outputs: ``lr_finder_results.json`` (lr/loss curve + suggestion), ``lr_finder_plot.png``
+and ``updated_config.yaml`` with the suggested learning rate written into
+``model.init_args.learning_rate``.
+"""
+
+import argparse
+import copy
 import json
-import matplotlib.pyplot as plt
-import torch
-import lightning.pytorch as L
-from lightning.pytorch.cli import LightningArgumentParser
+from pathlib import Path
+from typing import Any, Dict, List
+
+import yaml
 from lightning.pytorch.tuner import Tuner
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from lmpro.cli import LightningMasterProCLI
+from lmpro.cli import LightningMasterCLI
 
 
-def main():
-    """Main LR tuning function."""
-    parser = LightningArgumentParser()
-    parser.add_argument("--config", type=str, required=True,
-                       help="Path to the model configuration file")
-    parser.add_argument("--min_lr", type=float, default=1e-8,
-                       help="Minimum learning rate to test")
-    parser.add_argument("--max_lr", type=float, default=1e-1,
-                       help="Maximum learning rate to test")
-    parser.add_argument("--num_training_steps", type=int, default=200,
-                       help="Number of training steps for LR finder")
-    parser.add_argument("--mode", type=str, default="exponential",
-                       choices=["exponential", "linear"],
-                       help="LR progression mode")
-    parser.add_argument("--output_dir", type=str, default="lr_finder_results/",
-                       help="Directory to save results")
-    
-    args = parser.parse_args()
-    
-    # Load model and datamodule from config
-    cli = LightningMasterProCLI(
-        args=["--config", args.config, "--trainer.max_epochs", "1"],
-        run=False
+def parse_args() -> "tuple[argparse.Namespace, List[str]]":
+    parser = argparse.ArgumentParser(description="Find a learning rate with Lightning's Tuner")
+    parser.add_argument("--config", required=True, help="Training YAML config.")
+    parser.add_argument(
+        "--tuning_config", default="configs/tuning/lr_finder.yaml", help="YAML with an lr_finder section."
     )
-    
-    model = cli.model
-    datamodule = cli.datamodule
-    
-    # Create trainer for LR finding
-    trainer = L.Trainer(
-        accelerator="auto",
-        devices=1,
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=True,
-        max_epochs=1
+    parser.add_argument("--output_dir", default="lr_finder_results", help="Where to write results.")
+    return parser.parse_known_args()
+
+
+def load_section(path: str, section: str) -> Dict[str, Any]:
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    return dict(data.get(section) or {})
+
+
+def run_lr_finder(config: str, lr_kwargs: Dict[str, Any], overrides: List[str], output_dir: Path) -> float:
+    cli = LightningMasterCLI.from_config(
+        config,
+        *overrides,
+        "--trainer.logger=false",
+        "--trainer.callbacks=[]",
     )
-    
-    # Create tuner
-    tuner = Tuner(trainer)
-    
-    # Run LR finder
-    print("Running learning rate finder...")
-    lr_finder = tuner.lr_find(
-        model,
-        datamodule=datamodule,
-        min_lr=args.min_lr,
-        max_lr=args.max_lr,
-        num_training_steps=args.num_training_steps,
-        mode=args.mode,
-        early_stop_threshold=4.0
-    )
-    
-    # Create output directory
-    output_dir = Path(args.output_dir)
+    tuner = Tuner(cli.trainer)
+    lr_finder = tuner.lr_find(cli.model, datamodule=cli.datamodule, **lr_kwargs)
+    if lr_finder is None:
+        raise RuntimeError("lr_find returned nothing (are you running on rank > 0?)")
+
+    suggested = lr_finder.suggestion()
+    if suggested is None:
+        raise RuntimeError("lr_find could not suggest a learning rate; try more steps or a wider range")
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get suggested LR
-    suggested_lr = lr_finder.suggestion()
-    print(f"Suggested learning rate: {suggested_lr}")
-    
-    # Save results
     results = {
-        "suggested_lr": float(suggested_lr),
-        "min_lr": args.min_lr,
-        "max_lr": args.max_lr,
-        "num_training_steps": args.num_training_steps,
-        "mode": args.mode,
-        "lr_schedule": lr_finder.results.tolist(),
-        "losses": [float(x) for x in lr_finder.results["loss"]]
+        "suggested_lr": float(suggested),
+        "lr": [float(x) for x in lr_finder.results["lr"]],
+        "loss": [float(x) for x in lr_finder.results["loss"]],
+        "lr_find_kwargs": lr_kwargs,
     }
-    
-    with open(output_dir / "lr_finder_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    
-    # Plot results
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(lr_finder.results["lr"], lr_finder.results["loss"])
-    ax.set_xscale("log")
-    ax.set_xlabel("Learning Rate")
-    ax.set_ylabel("Loss")
-    ax.set_title("Learning Rate Finder Results")
-    ax.axvline(x=suggested_lr, color='red', linestyle='--', 
-               label=f'Suggested LR: {suggested_lr:.2e}')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(output_dir / "lr_finder_plot.png", dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    # Save updated config with suggested LR
-    updated_config_path = output_dir / "updated_config.yaml"
-    
-    # Read original config and update learning rate
-    import yaml
-    with open(args.config, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Update learning rate in config
-    if 'model' in config and 'init_args' in config['model']:
-        config['model']['init_args']['learning_rate'] = float(suggested_lr)
-    elif 'model' in config:
-        config['model']['learning_rate'] = float(suggested_lr)
-    
-    with open(updated_config_path, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False, indent=2)
-    
-    print(f"Results saved to: {output_dir}")
-    print(f"Plot saved to: {output_dir / 'lr_finder_plot.png'}")
-    print(f"Updated config saved to: {updated_config_path}")
-    print(f"Suggested learning rate: {suggested_lr:.2e}")
+    (output_dir / "lr_finder_results.json").write_text(json.dumps(results, indent=2))
+
+    fig = lr_finder.plot(suggest=True)
+    fig.savefig(output_dir / "lr_finder_plot.png", dpi=150, bbox_inches="tight")
+
+    with open(config) as f:
+        updated = copy.deepcopy(yaml.safe_load(f))
+    updated.setdefault("model", {}).setdefault("init_args", {})["learning_rate"] = float(suggested)
+    (output_dir / "updated_config.yaml").write_text(yaml.safe_dump(updated, sort_keys=False))
+    return float(suggested)
+
+
+def main() -> float:
+    args, overrides = parse_args()
+    lr_kwargs = load_section(args.tuning_config, "lr_finder")
+    output_dir = Path(args.output_dir)
+    suggested = run_lr_finder(args.config, lr_kwargs, overrides, output_dir)
+    print(f"Suggested learning rate: {suggested:.3e}")
+    print(f"Results written to {output_dir}")
+    return suggested
 
 
 if __name__ == "__main__":

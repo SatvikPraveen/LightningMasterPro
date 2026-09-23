@@ -1,67 +1,28 @@
 # configs/defaults.yaml
-# Common default settings for all experiments
+# Shared trainer defaults. LightningCLI merges multiple --config files left to right, so layer it under any
+# domain config:
+#
+#   python scripts/train.py fit --config configs/defaults.yaml --config configs/vision/classifier.yaml
+#
+# The domain configs are also complete on their own; this file only exists to show config layering.
 
 seed_everything: 42
 
 trainer:
-  max_epochs: 10
   accelerator: auto
   devices: auto
-  precision: 16-mixed
+  precision: 32-true          # use 16-mixed / bf16-mixed on GPU
+  max_epochs: 10
   log_every_n_steps: 10
-  enable_checkpointing: true
-  enable_progress_bar: true
-  enable_model_summary: true
+  gradient_clip_val: 1.0
   deterministic: false
   benchmark: true
-
-model:
-  learning_rate: 1e-3
-  weight_decay: 1e-4
-
-data:
-  batch_size: 32
-  num_workers: 4
-  pin_memory: true
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-    init_args:
-      dirpath: checkpoints/
-      filename: "{epoch:02d}-{val_loss:.2f}"
-      monitor: val_loss
-      mode: min
-      save_top_k: 3
-      save_last: true
-      verbose: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_loss
-      mode: min
-      patience: 5
-      verbose: true
-      strict: true
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
-      name: default_experiment
-      version: null
-
-optimizer:
-  class_path: torch.optim.AdamW
-  init_args:
-    lr: ${model.learning_rate}
-    weight_decay: ${model.weight_decay}
-
-lr_scheduler:
-  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
-  init_args:
-    T_max: ${trainer.max_epochs}
-    eta_min: 1e-6
+  enable_progress_bar: true
+  enable_model_summary: true
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.RichModelSummary
+      init_args:
+        max_depth: 2

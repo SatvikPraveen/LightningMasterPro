@@ -1,69 +1,26 @@
 # configs/tuning/ablation_study.yaml
-# Configuration for systematic ablation studies
+# Consumed by scripts/run_ablation.py. Every combination of `parameters` is written
+# into a copy of the base config (dotted keys address nested YAML) and trained with
+# `LightningMasterCLI(args=["fit", "--config", ...])`.
+#
+#   python scripts/run_ablation.py --config configs/vision/classifier.yaml \
+#       --ablation_config configs/tuning/ablation_study.yaml --max_combinations 4
 
-defaults:
-  - /defaults.yaml
-
-seed_everything: 42
-
-trainer:
-  max_epochs: 5
-  accelerator: auto
-  devices: 1
-  precision: 16-mixed
-  deterministic: true
-
-# Ablation parameters to sweep
 ablation:
-  experiment_name: "model_architecture_ablation"
+  experiment_name: classifier_lr_wd_dropout
 
-  # Parameters to ablate
   parameters:
-    learning_rate: [1e-4, 3e-4, 1e-3, 3e-3]
-    weight_decay: [0, 1e-5, 1e-4, 1e-3]
-    dropout_rate: [0.0, 0.1, 0.2, 0.3]
-    batch_size: [16, 32, 64, 128]
+    model.init_args.learning_rate: [1.0e-4, 1.0e-3]
+    model.init_args.weight_decay: [0.0, 1.0e-4]
+    model.init_args.dropout: [0.1, 0.3]
 
-  # Fixed parameters (not ablated)
-  fixed:
-    num_workers: 2
-    pin_memory: true
+  # Applied to trainer.* of every run so the sweep stays cheap.
+  trainer_overrides:
+    max_epochs: 2
+    limit_train_batches: 20
+    limit_val_batches: 5
 
-  # Metrics to track
+  # Read from trainer.callback_metrics after each fit. The first one picks the best run.
   metrics:
-    - val_loss
-    - val_acc
-    - train_time
-    - gpu_memory
-
-# Base configurations
-model:
-  learning_rate: 1e-3 # Will be overridden by ablation
-  weight_decay: 1e-4 # Will be overridden by ablation
-
-data:
-  batch_size: 32 # Will be overridden by ablation
-  num_workers: 2
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-    init_args:
-      dirpath: checkpoints/ablation/${ablation.experiment_name}/
-      filename: "run_{now:%Y%m%d_%H%M%S}-{epoch:02d}"
-      save_top_k: 1
-      monitor: val_loss
-      mode: min
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/ablation/
-      name: ${ablation.experiment_name}
-      version: null
-
-# Output settings
-output:
-  results_dir: "ablation_results/"
-  summary_table: "ablation_summary.csv"
-  best_config: "best_config.yaml"
-  plots_dir: "ablation_plots/"
+    - val/loss
+    - val/acc

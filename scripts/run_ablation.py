@@ -1,253 +1,173 @@
 # scripts/run_ablation.py
-"""Script for running systematic ablation studies."""
+"""Grid ablation over any config keys, one full LightningCLI ``fit`` per combination.
 
-import sys
-from pathlib import Path
-import json
-import yaml
-import time
+Usage::
+
+    python scripts/run_ablation.py --config configs/vision/classifier.yaml \
+        [--ablation_config configs/tuning/ablation_study.yaml] [--output_dir ablation_results] [--max_combinations 8]
+
+The ablation YAML lists dotted config paths and the values to sweep, e.g.::
+
+    ablation:
+      experiment_name: classifier_lr_wd
+      parameters:
+        model.init_args.learning_rate: [1e-4, 1e-3]
+        model.init_args.weight_decay: [0.0, 1e-4]
+      trainer_overrides:
+        max_epochs: 2
+      metrics: [val/loss, val/acc]
+
+Each run gets its own config file, TensorBoard logger name and checkpoint directory.
+Results are aggregated into ``ablation_summary.csv`` plus per-parameter box plots.
+"""
+
+import argparse
+import copy
 import itertools
+import json
+import random
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, List
+
+import matplotlib
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
-import lightning.pytorch as L
-from lightning.pytorch.cli import LightningArgumentParser
-from lightning.pytorch.loggers import TensorBoardLogger
+import yaml
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from lmpro.cli import LightningMasterCLI
 
-from lmpro.cli import LightningMasterProCLI
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 
-def main():
-    """Main ablation study function."""
-    parser = LightningArgumentParser()
-    parser.add_argument("--config", type=str, required=True,
-                       help="Path to the base configuration file")
-    parser.add_argument("--ablation_config", type=str, required=True,
-                       help="Path to the ablation configuration file")
-    parser.add_argument("--output_dir", type=str, default="ablation_results/",
-                       help="Directory to save results")
-    parser.add_argument("--max_combinations", type=int, default=50,
-                       help="Maximum number of parameter combinations to test")
-    
-    args = parser.parse_args()
-    
-    # Load base config
-    with open(args.config, 'r') as f:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run a grid ablation with LightningCLI")
+    parser.add_argument("--config", required=True, help="Base training YAML config.")
+    parser.add_argument(
+        "--ablation_config", default="configs/tuning/ablation_study.yaml", help="YAML with an ablation section."
+    )
+    parser.add_argument("--output_dir", default="ablation_results", help="Root output directory.")
+    parser.add_argument("--max_combinations", type=int, default=16, help="Random subset size if the grid is larger.")
+    parser.add_argument("--seed", type=int, default=42, help="Seed for sampling the grid subset.")
+    return parser.parse_args()
+
+
+def set_nested(config: Dict[str, Any], dotted_key: str, value: Any) -> None:
+    node = config
+    *parents, leaf = dotted_key.split(".")
+    for key in parents:
+        node = node.setdefault(key, {})
+    node[leaf] = value
+
+
+def build_experiment_config(
+    base: Dict[str, Any], params: Dict[str, Any], overrides: Dict[str, Any], name: str
+) -> Dict[str, Any]:
+    cfg = copy.deepcopy(base)
+    for key, value in params.items():
+        set_nested(cfg, key, value)
+    for key, value in overrides.items():
+        set_nested(cfg, f"trainer.{key}", value)
+
+    logger = cfg.get("trainer", {}).get("logger")
+    if isinstance(logger, dict) and "init_args" in logger:
+        logger["init_args"]["name"] = name
+    for callback in cfg.get("trainer", {}).get("callbacks", []) or []:
+        if isinstance(callback, dict) and callback.get("class_path", "").endswith("ModelCheckpoint"):
+            callback.setdefault("init_args", {})["dirpath"] = f"checkpoints/ablation/{name}"
+    return cfg
+
+
+def run_ablation(
+    base_config_path: str, ablation: Dict[str, Any], output_dir: Path, max_combinations: int, seed: int
+) -> pd.DataFrame:
+    with open(base_config_path) as f:
         base_config = yaml.safe_load(f)
-    
-    # Load ablation config
-    with open(args.ablation_config, 'r') as f:
-        ablation_config = yaml.safe_load(f)
-    
-    # Extract ablation parameters
-    ablation_params = ablation_config.get('ablation', {})
-    experiment_name = ablation_params.get('experiment_name', 'default_ablation')
-    parameters = ablation_params.get('parameters', {})
-    fixed_params = ablation_params.get('fixed', {})
-    metrics_to_track = ablation_params.get('metrics', ['val_loss', 'val_acc'])
-    
-    # Generate parameter combinations
-    param_names = list(parameters.keys())
-    param_values = list(parameters.values())
-    
-    # Create all combinations
-    all_combinations = list(itertools.product(*param_values))
-    
-    # Limit combinations if too many
-    if len(all_combinations) > args.max_combinations:
-        print(f"Too many combinations ({len(all_combinations)}), sampling {args.max_combinations}")
-        import random
-        random.seed(42)
-        all_combinations = random.sample(all_combinations, args.max_combinations)
-    
-    print(f"Running ablation study: {experiment_name}")
-    print(f"Testing {len(all_combinations)} parameter combinations")
-    print(f"Parameters: {param_names}")
-    
-    # Create output directory
-    output_dir = Path(args.output_dir) / experiment_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Results storage
-    results = []
-    
-    # Run experiments
-    for i, combination in enumerate(all_combinations):
-        print(f"\n=== Experiment {i+1}/{len(all_combinations)} ===")
-        
-        # Create experiment config
-        experiment_config = base_config.copy()
-        
-        # Update with current parameter combination
-        param_dict = dict(zip(param_names, combination))
-        print(f"Parameters: {param_dict}")
-        
-        # Update config with current parameters
-        for param_name, param_value in param_dict.items():
-            if param_name == 'learning_rate':
-                if 'model' in experiment_config:
-                    if 'init_args' in experiment_config['model']:
-                        experiment_config['model']['init_args']['learning_rate'] = param_value
-                    else:
-                        experiment_config['model']['learning_rate'] = param_value
-            elif param_name == 'weight_decay':
-                if 'model' in experiment_config:
-                    if 'init_args' in experiment_config['model']:
-                        experiment_config['model']['init_args']['weight_decay'] = param_value
-                    else:
-                        experiment_config['model']['weight_decay'] = param_value
-            elif param_name == 'dropout_rate':
-                if 'model' in experiment_config:
-                    if 'init_args' in experiment_config['model']:
-                        experiment_config['model']['init_args']['dropout_rate'] = param_value
-                    else:
-                        experiment_config['model']['dropout_rate'] = param_value
-            elif param_name == 'batch_size':
-                if 'data' in experiment_config:
-                    if 'init_args' in experiment_config['data']:
-                        experiment_config['data']['init_args']['batch_size'] = param_value
-                    else:
-                        experiment_config['data']['batch_size'] = param_value
-        
-        # Add fixed parameters
-        for param_name, param_value in fixed_params.items():
-            if param_name in ['num_workers', 'pin_memory']:
-                if 'data' in experiment_config:
-                    if 'init_args' in experiment_config['data']:
-                        experiment_config['data']['init_args'][param_name] = param_value
-                    else:
-                        experiment_config['data'][param_name] = param_value
-        
-        # Save experiment config
-        exp_config_path = output_dir / f"experiment_{i:03d}_config.yaml"
-        with open(exp_config_path, 'w') as f:
-            yaml.dump(experiment_config, f, default_flow_style=False, indent=2)
-        
-        # Run experiment
-        start_time = time.time()
-        
+
+    experiment_name = ablation.get("experiment_name", "ablation")
+    parameters: Dict[str, List[Any]] = ablation.get("parameters", {})
+    trainer_overrides: Dict[str, Any] = ablation.get("trainer_overrides", {})
+    metrics: List[str] = ablation.get("metrics", ["val/loss"])
+
+    names = list(parameters)
+    grid = list(itertools.product(*(parameters[n] for n in names)))
+    if len(grid) > max_combinations:
+        random.Random(seed).shuffle(grid)
+        grid = grid[:max_combinations]
+    print(f"{experiment_name}: {len(grid)} runs over {names}")
+
+    run_dir = output_dir / experiment_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    rows: List[Dict[str, Any]] = []
+    for i, combo in enumerate(grid):
+        params = dict(zip(names, combo))
+        run_name = f"{experiment_name}_{i:03d}"
+        cfg = build_experiment_config(base_config, params, trainer_overrides, run_name)
+        cfg_path = run_dir / f"{run_name}.yaml"
+        cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+
+        row: Dict[str, Any] = {"run": run_name, **params}
+        start = time.time()
         try:
-            # Create CLI with current config
-            config_args = ["--config", str(exp_config_path)]
-            
-            # Update logger name
-            if 'logger' in experiment_config:
-                for logger_config in experiment_config['logger']:
-                    if 'init_args' in logger_config:
-                        logger_config['init_args']['name'] = f"{experiment_name}_exp_{i:03d}"
-            
-            cli = LightningMasterProCLI(args=config_args, run=True)
-            
-            # Get metrics from trainer
-            trainer_state = cli.trainer.state
-            train_time = time.time() - start_time
-            
-            # Extract metrics from callbacks/loggers
-            experiment_results = {
-                'experiment_id': i,
-                'train_time': train_time,
-                'trainer_state': str(trainer_state),
-                **param_dict
-            }
-            
-            # Try to get validation metrics
-            if hasattr(cli.trainer, 'logged_metrics'):
-                logged_metrics = cli.trainer.logged_metrics
-                for metric in metrics_to_track:
-                    if metric in logged_metrics:
-                        experiment_results[metric] = float(logged_metrics[metric])
-            
-            # Try to get from callback metrics
-            if hasattr(cli.trainer, 'callback_metrics'):
-                callback_metrics = cli.trainer.callback_metrics
-                for metric in metrics_to_track:
-                    if metric in callback_metrics:
-                        experiment_results[metric] = float(callback_metrics[metric])
-            
-            # Estimate GPU memory usage (if available)
-            if hasattr(cli.trainer, 'strategy') and hasattr(cli.trainer.strategy, 'root_device'):
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        experiment_results['gpu_memory'] = torch.cuda.max_memory_allocated() / 1024**3  # GB
-                except:
-                    pass
-            
-            results.append(experiment_results)
-            print(f"Experiment {i+1} completed successfully")
-            
-        except Exception as e:
-            print(f"Experiment {i+1} failed: {e}")
-            experiment_results = {
-                'experiment_id': i,
-                'train_time': time.time() - start_time,
-                'error': str(e),
-                **param_dict
-            }
-            results.append(experiment_results)
-    
-    # Save results
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(output_dir / "ablation_summary.csv", index=False)
-    
-    # Save detailed results
-    with open(output_dir / "ablation_results.json", 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    # Find best configuration
-    if 'val_loss' in results_df.columns:
-        best_idx = results_df['val_loss'].idxmin()
-        best_config = results_df.loc[best_idx]
-        
-        print(f"\n=== Best Configuration ===")
-        print(best_config)
-        
-        # Save best config
-        with open(output_dir / "best_config.yaml", 'w') as f:
-            yaml.dump(best_config.to_dict(), f, default_flow_style=False, indent=2)
-    
-    # Create visualizations
-    plots_dir = output_dir / "plots"
+            saved_argv, sys.argv = sys.argv, sys.argv[:1]  # keep LightningCLI from seeing this script's argv
+            try:
+                cli = LightningMasterCLI(args=["fit", "--config", str(cfg_path)])
+            finally:
+                sys.argv = saved_argv
+            row["train_time_s"] = round(time.time() - start, 2)
+            for metric in metrics:
+                if metric in cli.trainer.callback_metrics:
+                    row[metric] = float(cli.trainer.callback_metrics[metric])
+            row["status"] = "ok"
+        except Exception as exc:  # noqa: BLE001 - one failing run must not kill the sweep
+            row["train_time_s"] = round(time.time() - start, 2)
+            row["status"] = f"error: {exc}"
+        print(f"[{i + 1}/{len(grid)}] {row}")
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(run_dir / "ablation_summary.csv", index=False)
+    (run_dir / "ablation_results.json").write_text(json.dumps(rows, indent=2, default=str))
+
+    primary = metrics[0] if metrics else None
+    if primary and primary in df.columns and df[primary].notna().any():
+        best = df.loc[df[primary].idxmin()]
+        best_params = {n: (best[n].item() if hasattr(best[n], "item") else best[n]) for n in names}
+        (run_dir / "best_config.yaml").write_text(
+            yaml.safe_dump(
+                build_experiment_config(base_config, best_params, trainer_overrides, "best"), sort_keys=False
+            )
+        )
+        print(f"Best {primary}: {best[primary]:.4f} with {best_params}")
+
+    _plot(df, names, [m for m in metrics if m in df.columns], run_dir / "plots")
+    return df
+
+
+def _plot(df: pd.DataFrame, names: List[str], metrics: List[str], plots_dir: Path) -> None:
+    if not metrics or df.empty:
+        return
     plots_dir.mkdir(exist_ok=True)
-    
-    # Plot results for each parameter
-    for param_name in param_names:
-        if param_name in results_df.columns:
-            fig, axes = plt.subplots(1, len(metrics_to_track), figsize=(15, 5))
-            if len(metrics_to_track) == 1:
-                axes = [axes]
-            
-            for j, metric in enumerate(metrics_to_track):
-                if metric in results_df.columns:
-                    ax = axes[j]
-                    results_df.boxplot(column=metric, by=param_name, ax=ax)
-                    ax.set_title(f'{metric} vs {param_name}')
-                    ax.set_xlabel(param_name)
-                    ax.set_ylabel(metric)
-            
-            plt.tight_layout()
-            plt.savefig(plots_dir / f"{param_name}_analysis.png", dpi=300, bbox_inches='tight')
-            plt.close()
-    
-    # Create correlation heatmap
-    if len(results_df.select_dtypes(include=['number']).columns) > 1:
-        plt.figure(figsize=(10, 8))
-        numeric_cols = results_df.select_dtypes(include=['number']).columns
-        corr_matrix = results_df[numeric_cols].corr()
-        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0)
-        plt.title('Parameter Correlation Matrix')
-        plt.tight_layout()
-        plt.savefig(plots_dir / "correlation_matrix.png", dpi=300, bbox_inches='tight')
-        plt.close()
-    
-    print(f"\n=== Ablation Study Complete ===")
-    print(f"Results saved to: {output_dir}")
-    print(f"Summary: {output_dir / 'ablation_summary.csv'}")
-    print(f"Plots: {plots_dir}")
+    for name in names:
+        fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 4), squeeze=False)
+        for ax, metric in zip(axes[0], metrics):
+            df.boxplot(column=metric, by=name, ax=ax)
+            ax.set_title(f"{metric} vs {name}")
+        fig.suptitle("")
+        fig.tight_layout()
+        fig.savefig(plots_dir / f"{name.replace('.', '_')}.png", dpi=120)
+        plt.close(fig)
+
+
+def main() -> pd.DataFrame:
+    args = parse_args()
+    with open(args.ablation_config) as f:
+        ablation = (yaml.safe_load(f) or {}).get("ablation", {})
+    df = run_ablation(args.config, ablation, Path(args.output_dir), args.max_combinations, args.seed)
+    print(df.to_string(index=False))
+    return df
 
 
 if __name__ == "__main__":

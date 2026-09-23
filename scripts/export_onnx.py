@@ -1,125 +1,128 @@
 # scripts/export_onnx.py
-"""Script for exporting trained models to ONNX format."""
+"""Export a trained LightningModule to ONNX and verify it with onnxruntime.
 
-import sys
+Usage::
+
+    python scripts/export_onnx.py --config configs/vision/classifier.yaml \
+        --checkpoint checkpoints/vision/classifier/last.ckpt --output exports/classifier.onnx
+
+What it demonstrates
+--------------------
+* ``LightningModule.to_onnx`` with an input sample taken from the real datamodule
+  (so dtypes and shapes are always right, including integer token ids for NLP).
+* A dynamic batch axis so the exported graph accepts any batch size.
+* ``onnx.checker`` structural validation.
+* Numerical parity: PyTorch vs onnxruntime outputs are compared with ``np.allclose``.
+"""
+
+import argparse
 from pathlib import Path
+from typing import Any, List, Sequence
+
+import numpy as np
 import torch
-import onnx
-from lightning.pytorch.cli import LightningArgumentParser
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from lmpro.cli import LightningMasterCLI
 
 
-def main():
-    """Main ONNX export function."""
-    parser = LightningArgumentParser()
-    parser.add_argument("--model_path", type=str, required=True,
-                       help="Path to the trained model checkpoint")
-    parser.add_argument("--output_path", type=str, required=True,
-                       help="Path to save the ONNX model")
-    parser.add_argument("--input_shape", type=str, default=None,
-                       help="Input shape as comma-separated values (e.g., '1,3,224,224')")
-    parser.add_argument("--dynamic_axes", action="store_true",
-                       help="Use dynamic axes for variable input sizes")
-    
-    args = parser.parse_args()
-    
-    # Load model from checkpoint
-    print(f"Loading model from {args.model_path}")
-    checkpoint = torch.load(args.model_path, map_location="cpu")
-    
-    # Determine model class and create dummy input
-    model_class = None
-    dummy_input = None
-    
-    if "hyper_parameters" in checkpoint:
-        hp = checkpoint["hyper_parameters"]
-        
-        if "backbone" in hp:
-            # Vision models
-            if "num_classes" in hp and hp["num_classes"] > 1:
-                from lmpro.modules.vision.classifier import VisionClassifier
-                model_class = VisionClassifier
-                dummy_input = torch.randn(1, 3, 224, 224)  # Standard image size
-            else:
-                from lmpro.modules.vision.segmenter import VisionSegmenter
-                model_class = VisionSegmenter
-                dummy_input = torch.randn(1, 3, 256, 256)  # Segmentation size
-                
-        elif "vocab_size" in hp:
-            # NLP models
-            if "sequence_length" in hp:
-                from lmpro.modules.nlp.char_lm import CharacterLM
-                model_class = CharacterLM
-                seq_len = hp.get("sequence_length", 256)
-                dummy_input = torch.randint(0, hp["vocab_size"], (1, seq_len))
-            else:
-                from lmpro.modules.nlp.sentiment import SentimentClassifier
-                model_class = SentimentClassifier
-                dummy_input = torch.randint(0, hp["vocab_size"], (1, 512))
-                
-        elif "input_dim" in hp and "hidden_dims" in hp:
-            # Tabular models
-            from lmpro.modules.tabular.mlp_reg_cls import MLPRegCls
-            model_class = MLPRegCls
-            dummy_input = torch.randn(1, hp["input_dim"])
-            
-        elif "prediction_length" in hp:
-            # Time series models
-            from lmpro.modules.timeseries.forecaster import TimeSeriesForecaster
-            model_class = TimeSeriesForecaster
-            seq_len = hp.get("sequence_length", 100)
-            input_dim = hp.get("input_dim", 1)
-            dummy_input = torch.randn(1, seq_len, input_dim)
-    
-    if model_class is None:
-        raise ValueError("Could not determine model class from checkpoint")
-    
-    # Override dummy input if shape provided
-    if args.input_shape:
-        shape = [int(x) for x in args.input_shape.split(",")]
-        dummy_input = torch.randn(*shape)
-    
-    # Load model
-    model = model_class.load_from_checkpoint(args.model_path)
-    model.eval()
-    
-    # Create output directory
-    output_path = Path(args.output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Set up dynamic axes
+def parse_args() -> "tuple[argparse.Namespace, List[str]]":
+    parser = argparse.ArgumentParser(description="Export a LightningMasterPro checkpoint to ONNX")
+    parser.add_argument("--config", required=True, help="Training YAML config.")
+    parser.add_argument("--checkpoint", required=True, help="Path to the .ckpt file.")
+    parser.add_argument("--output", required=True, help="Destination .onnx path.")
+    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version.")
+    parser.add_argument("--static_batch", action="store_true", help="Disable the dynamic batch axis.")
+    parser.add_argument("--no_verify", action="store_true", help="Skip the onnxruntime parity check.")
+    parser.add_argument("--atol", type=float, default=1e-4, help="Absolute tolerance for the parity check.")
+    return parser.parse_known_args()
+
+
+def _first_batch_input(datamodule: Any) -> torch.Tensor:
+    """Return the model input from the first validation batch (batch size 1)."""
+    datamodule.setup("fit")
+    batch = next(iter(datamodule.val_dataloader()))
+    x = batch[0] if isinstance(batch, (tuple, list)) else batch["input"] if isinstance(batch, dict) else batch
+    return x[:1].clone()
+
+
+def _as_tuple(outputs: Any) -> Sequence[torch.Tensor]:
+    if isinstance(outputs, torch.Tensor):
+        return (outputs,)
+    if isinstance(outputs, (tuple, list)):
+        flat: List[torch.Tensor] = []
+        for item in outputs:
+            flat.extend(_as_tuple(item))
+        return tuple(flat)
+    raise TypeError(f"Unsupported model output type: {type(outputs)}")
+
+
+def export(config: str, checkpoint: str, output: str, opset: int = 17, dynamic_batch: bool = True) -> Path:
+    cli = LightningMasterCLI.from_config(config, "--trainer.logger=false", "--trainer.callbacks=[]")
+    model = type(cli.model).load_from_checkpoint(checkpoint, map_location="cpu").eval()
+
+    input_sample = model.example_input_array
+    if input_sample is None:
+        input_sample = _first_batch_input(cli.datamodule)
+
+    with torch.no_grad():
+        outputs = _as_tuple(model(input_sample))
+    output_names = [f"output_{i}" for i in range(len(outputs))] if len(outputs) > 1 else ["output"]
+
     dynamic_axes = None
-    if args.dynamic_axes:
-        dynamic_axes = {
-            'input': {0: 'batch_size'},
-            'output': {0: 'batch_size'}
-        }
-    
-    # Export to ONNX
-    print(f"Exporting to ONNX: {output_path}")
-    print(f"Input shape: {dummy_input.shape}")
-    
-    torch.onnx.export(
-        model,
-        dummy_input,
-        str(output_path),
+    if dynamic_batch:
+        dynamic_axes = {"input": {0: "batch"}, **{name: {0: "batch"} for name in output_names}}
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    model.to_onnx(
+        out_path,
+        input_sample,
         export_params=True,
-        opset_version=11,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output'],
-        dynamic_axes=dynamic_axes
+        opset_version=opset,
+        input_names=["input"],
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+        dynamo=False,
     )
-    
-    # Verify the exported model
-    onnx_model = onnx.load(str(output_path))
-    onnx.checker.check_model(onnx_model)
-    
-    print("ONNX export successful!")
-    print(f"Model saved to: {output_path}")
-    print(f"Model size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+    return out_path
+
+
+def verify(onnx_path: Path, config: str, checkpoint: str, atol: float = 1e-4) -> float:
+    """Structural check plus PyTorch/onnxruntime parity. Returns the max abs difference."""
+    import onnx
+    import onnxruntime as ort
+
+    onnx.checker.check_model(onnx.load(str(onnx_path)))
+
+    cli = LightningMasterCLI.from_config(config, "--trainer.logger=false", "--trainer.callbacks=[]")
+    model = type(cli.model).load_from_checkpoint(checkpoint, map_location="cpu").eval()
+    input_sample = model.example_input_array
+    if input_sample is None:
+        input_sample = _first_batch_input(cli.datamodule)
+
+    with torch.no_grad():
+        torch_out = _as_tuple(model(input_sample))
+
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    ort_out = session.run(None, {"input": input_sample.numpy()})
+
+    max_diff = 0.0
+    for expected, actual in zip(torch_out, ort_out):
+        diff = float(np.max(np.abs(expected.numpy() - actual)))
+        max_diff = max(max_diff, diff)
+        if not np.allclose(expected.numpy(), actual, atol=atol):
+            raise AssertionError(f"ONNX output differs from PyTorch (max abs diff {diff:.3e} > atol {atol})")
+    return max_diff
+
+
+def main() -> Path:
+    args, _ = parse_args()
+    out_path = export(args.config, args.checkpoint, args.output, args.opset, dynamic_batch=not args.static_batch)
+    print(f"Exported to {out_path} ({out_path.stat().st_size / 1024 / 1024:.2f} MB)")
+    if not args.no_verify:
+        max_diff = verify(out_path, args.config, args.checkpoint, args.atol)
+        print(f"onnxruntime parity OK (max abs diff {max_diff:.3e})")
+    return out_path
 
 
 if __name__ == "__main__":

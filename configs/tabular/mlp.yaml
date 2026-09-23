@@ -1,65 +1,67 @@
 # configs/tabular/mlp.yaml
-# @package _global_
-
-defaults:
-  - /defaults.yaml
+# python scripts/train.py fit --config configs/tabular/mlp.yaml
+# Regression on synthetic tabular data. Switch to classification by setting model.init_args.task,
+# model.init_args.output_dim (= num_classes) and data.init_args.task together.
 
 seed_everything: 42
 
 model:
-  class_path: lmpro.modules.tabular.mlp_reg_cls.MLPRegCls
+  class_path: lmpro.modules.tabular.mlp_reg_cls.MLPRegressorClassifier
   init_args:
     input_dim: 20
-    hidden_dims: [128, 64, 32]
     output_dim: 1
-    task_type: regression
-    dropout_rate: 0.2
-    batch_norm: true
-    learning_rate: 5e-4
-    weight_decay: 1e-4
+    task: regression             # regression | classification
+    hidden_dims: [128, 64, 32]
+    dropout: 0.2
+    activation: relu
+    use_batch_norm: true
+    learning_rate: 5.0e-4
+    weight_decay: 1.0e-4
+    optimizer: adamw
+    scheduler: onecycle
 
 data:
   class_path: lmpro.datamodules.tabular_dm.TabularDataModule
   init_args:
-    data_dir: data/synthetic/
-    dataset_type: regression
+    task: regression
+    data_config:                 # lmpro.data.synth_tabular.TabularDatasetConfig (dataclass)
+      num_samples: 5000
+      num_features: 20
+      num_informative: 15
+      noise_level: 0.1
     batch_size: 128
     num_workers: 4
     pin_memory: true
+    persistent_workers: true
     normalize_features: true
-    target_transform: standardize
 
 trainer:
   max_epochs: 50
   accelerator: auto
   devices: 1
-  precision: 32
+  precision: 32-true
   gradient_clip_val: 0.5
-  accumulate_grad_batches: 1
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
-      dirpath: checkpoints/tabular/mlp/
-      filename: "mlp-{epoch:02d}-{val_mse:.4f}"
-      monitor: val_mse
-      mode: min
-      save_top_k: 3
-      save_last: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_mse
-      mode: min
-      patience: 10
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
+      save_dir: logs
       name: tabular_mlp
-      version: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints/tabular/mlp
+        filename: "epoch{epoch:02d}-step{step}"
+        auto_insert_metric_name: false
+        monitor: val/loss
+        mode: min
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        mode: min
+        patience: 10
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step

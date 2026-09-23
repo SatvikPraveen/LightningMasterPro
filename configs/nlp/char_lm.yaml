@@ -1,64 +1,67 @@
 # configs/nlp/char_lm.yaml
-# @package _global_
-
-defaults:
-  - /defaults.yaml
+# python scripts/train.py fit --config configs/nlp/char_lm.yaml
+# vocab_size must match the synthetic character vocabulary built by the datamodule (see NLPDataModule.vocab_size).
 
 seed_everything: 42
 
 model:
-  class_path: lmpro.modules.nlp.char_lm.CharacterLM
+  class_path: lmpro.modules.nlp.char_lm.CharacterLanguageModel
   init_args:
     vocab_size: 128
-    embed_dim: 256
-    hidden_dim: 512
-    num_layers: 3
-    dropout_rate: 0.2
-    learning_rate: 1e-3
-    weight_decay: 1e-5
+    embedding_dim: 128
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.2
+    rnn_type: lstm               # lstm | gru
+    learning_rate: 1.0e-3
+    weight_decay: 1.0e-5
+    optimizer: adamw
+    scheduler: onecycle
+    gradient_clip_val: 1.0
 
 data:
   class_path: lmpro.datamodules.nlp_dm.NLPDataModule
   init_args:
-    data_dir: data/synthetic/
-    dataset_type: char_lm
+    task: language_modeling
+    data_config:                 # lmpro.data.synth_nlp.NLPDatasetConfig (dataclass)
+      num_samples: 2000
+      vocab_size: 128
+      max_sequence_length: 128
+      min_sequence_length: 32
     batch_size: 64
     num_workers: 4
     pin_memory: true
-    sequence_length: 256
-    vocab_size: 128
+    persistent_workers: true
+    max_length: 128
 
 trainer:
   max_epochs: 25
   accelerator: auto
   devices: 1
-  precision: 16-mixed
+  precision: 32-true
   gradient_clip_val: 1.0
   accumulate_grad_batches: 2
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
-      dirpath: checkpoints/nlp/char_lm/
-      filename: "char_lm-{epoch:02d}-{val_loss:.3f}"
-      monitor: val_loss
-      mode: min
-      save_top_k: 3
-      save_last: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_loss
-      mode: min
-      patience: 8
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
+      save_dir: logs
       name: nlp_char_lm
-      version: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints/nlp/char_lm
+        filename: "epoch{epoch:02d}-step{step}"
+        auto_insert_metric_name: false
+        monitor: val/loss
+        mode: min
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        mode: min
+        patience: 8
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step

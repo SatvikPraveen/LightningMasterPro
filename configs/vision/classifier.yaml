@@ -1,62 +1,67 @@
 # configs/vision/classifier.yaml
-# @package _global_
-
-defaults:
-  - /defaults.yaml
+# python scripts/train.py fit --config configs/vision/classifier.yaml
 
 seed_everything: 42
 
 model:
   class_path: lmpro.modules.vision.classifier.VisionClassifier
   init_args:
-    backbone: resnet18
     num_classes: 10
-    learning_rate: 3e-4
-    weight_decay: 1e-4
-    dropout_rate: 0.1
+    input_channels: 3
+    architecture: resnet        # cnn | resnet
+    hidden_dims: [32, 64, 128, 256]
+    dropout: 0.3
+    learning_rate: 3.0e-4
+    weight_decay: 1.0e-4
+    optimizer: adamw
+    scheduler: onecycle
+    label_smoothing: 0.1
+    mixup_alpha: 0.2
 
 data:
   class_path: lmpro.datamodules.vision_dm.VisionDataModule
   init_args:
-    data_dir: data/synthetic/
-    dataset_type: CIFAR10
+    task: classification
+    data_config:                # lmpro.data.synth_vision.VisionDatasetConfig (dataclass)
+      num_samples: 2000
+      image_size: [32, 32]
+      num_channels: 3
+      num_classes: 10
+      noise_level: 0.1
     batch_size: 64
     num_workers: 4
     pin_memory: true
-    image_size: [32, 32]
-    augment: true
+    persistent_workers: true
+    split_ratios: [0.7, 0.15, 0.15]
 
 trainer:
   max_epochs: 20
   accelerator: auto
   devices: 1
-  precision: 16-mixed
+  precision: 32-true          # 16-mixed on GPU
   gradient_clip_val: 0.5
   accumulate_grad_batches: 1
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
-      dirpath: checkpoints/vision/classifier/
-      filename: "classifier-{epoch:02d}-{val_acc:.3f}"
-      monitor: val_acc
-      mode: max
-      save_top_k: 3
-      save_last: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_acc
-      mode: max
-      patience: 7
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
+      save_dir: logs
       name: vision_classifier
-      version: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints/vision/classifier
+        filename: "epoch{epoch:02d}-step{step}"
+        auto_insert_metric_name: false
+        monitor: val/acc
+        mode: max
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/acc
+        mode: max
+        patience: 7
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step

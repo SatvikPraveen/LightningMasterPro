@@ -1,282 +1,141 @@
 # tests/test_configs.py
-"""Tests for validating YAML configuration files."""
+"""Every YAML config must resolve to real classes and match their constructor signatures exactly."""
+
+import importlib
+import inspect
+from pathlib import Path
 
 import pytest
 import yaml
-from pathlib import Path
-import sys
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-# Get config directory
 CONFIG_DIR = Path(__file__).parent.parent / "configs"
+TRAINING_CONFIGS = sorted(
+    p for p in CONFIG_DIR.rglob("*.yaml") if p.parent.name not in ("tuning",) and p.name != "defaults.yaml"
+)
+TUNING_CONFIGS = sorted((CONFIG_DIR / "tuning").glob("*.yaml"))
 
 
-def test_config_directory_exists():
-    """Test that config directory exists."""
-    assert CONFIG_DIR.exists(), f"Config directory not found: {CONFIG_DIR}"
+def load(path: Path) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
 
 
-def test_defaults_config_valid():
-    """Test that defaults.yaml is valid."""
-    defaults_path = CONFIG_DIR / "defaults.yaml"
-    assert defaults_path.exists(), "defaults.yaml not found"
-    
-    with open(defaults_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Check required sections
-    assert 'seed_everything' in config
-    assert 'trainer' in config
-    assert 'model' in config
-    assert 'data' in config
-    assert 'callbacks' in config
-    assert 'logger' in config
-    
-    # Validate trainer config
-    trainer_config = config['trainer']
-    assert 'max_epochs' in trainer_config
-    assert 'accelerator' in trainer_config
-    assert 'devices' in trainer_config
-    assert isinstance(trainer_config['max_epochs'], int)
-    assert trainer_config['max_epochs'] > 0
+def resolve(class_path: str):
+    module_name, class_name = class_path.rsplit(".", 1)
+    return getattr(importlib.import_module(module_name), class_name)
 
 
-def test_vision_configs_valid():
-    """Test that vision configs are valid."""
-    vision_dir = CONFIG_DIR / "vision"
-    assert vision_dir.exists(), "vision config directory not found"
-    
-    # Test classifier config
-    classifier_path = vision_dir / "classifier.yaml"
-    assert classifier_path.exists(), "classifier.yaml not found"
-    
-    with open(classifier_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    assert 'data' in config
-    assert 'trainer' in config
-    
-    model_config = config['model']
-    assert 'class_path' in model_config
-    assert 'lmpro.modules.vision.classifier.VisionClassifier' in model_config['class_path']
-    
-    # Test segmenter config
-    segmenter_path = vision_dir / "segmenter.yaml"
-    assert segmenter_path.exists(), "segmenter.yaml not found"
-    
-    with open(segmenter_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    model_config = config['model']
-    assert 'lmpro.modules.vision.segmenter.VisionSegmenter' in model_config['class_path']
+def check_init_args(cls, init_args: dict, where: str) -> None:
+    sig = inspect.signature(cls.__init__)
+    params = {name: p for name, p in sig.parameters.items() if name != "self"}
+    if cls.__module__.startswith("lmpro."):
+        # Our own classes must fail loudly on a typo instead of swallowing it.
+        assert not any(p.kind is p.VAR_KEYWORD for p in params.values()), f"{cls.__name__} must not accept **kwargs"
 
+    unknown = set(init_args) - set(params)
+    assert not unknown, f"{where}: unknown init_args for {cls.__name__}: {sorted(unknown)}"
 
-def test_nlp_configs_valid():
-    """Test that NLP configs are valid."""
-    nlp_dir = CONFIG_DIR / "nlp"
-    assert nlp_dir.exists(), "nlp config directory not found"
-    
-    # Test char_lm config
-    char_lm_path = nlp_dir / "char_lm.yaml"
-    assert char_lm_path.exists(), "char_lm.yaml not found"
-    
-    with open(char_lm_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    model_config = config['model']
-    assert 'lmpro.modules.nlp.char_lm.CharacterLM' in model_config['class_path']
-    
-    # Test sentiment config
-    sentiment_path = nlp_dir / "sentiment.yaml"
-    assert sentiment_path.exists(), "sentiment.yaml not found"
-    
-    with open(sentiment_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    model_config = config['model']
-    assert 'lmpro.modules.nlp.sentiment.SentimentClassifier' in model_config['class_path']
-
-
-def test_tabular_config_valid():
-    """Test that tabular config is valid."""
-    tabular_dir = CONFIG_DIR / "tabular"
-    assert tabular_dir.exists(), "tabular config directory not found"
-    
-    mlp_path = tabular_dir / "mlp.yaml"
-    assert mlp_path.exists(), "mlp.yaml not found"
-    
-    with open(mlp_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    model_config = config['model']
-    assert 'lmpro.modules.tabular.mlp_reg_cls.MLPRegCls' in model_config['class_path']
-
-
-def test_timeseries_config_valid():
-    """Test that timeseries config is valid."""
-    ts_dir = CONFIG_DIR / "timeseries"
-    assert ts_dir.exists(), "timeseries config directory not found"
-    
-    forecaster_path = ts_dir / "forecaster.yaml"
-    assert forecaster_path.exists(), "forecaster.yaml not found"
-    
-    with open(forecaster_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'model' in config
-    model_config = config['model']
-    assert 'lmpro.modules.timeseries.forecaster.TimeSeriesForecaster' in model_config['class_path']
-
-
-def test_tuning_configs_valid():
-    """Test that tuning configs are valid."""
-    tuning_dir = CONFIG_DIR / "tuning"
-    assert tuning_dir.exists(), "tuning config directory not found"
-    
-    # Test lr_finder config
-    lr_finder_path = tuning_dir / "lr_finder.yaml"
-    assert lr_finder_path.exists(), "lr_finder.yaml not found"
-    
-    with open(lr_finder_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'lr_finder' in config
-    lr_config = config['lr_finder']
-    assert 'min_lr' in lr_config
-    assert 'max_lr' in lr_config
-    assert isinstance(float(lr_config['min_lr']), float)
-    assert isinstance(float(lr_config['max_lr']), float)
-    assert float(lr_config['min_lr']) < float(lr_config['max_lr'])
-    
-    # Test batch_scaler config
-    batch_scaler_path = tuning_dir / "batch_scaler.yaml"
-    assert batch_scaler_path.exists(), "batch_scaler.yaml not found"
-    
-    with open(batch_scaler_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'batch_scaler' in config
-    batch_config = config['batch_scaler']
-    assert 'mode' in batch_config
-    assert batch_config['mode'] in ['power_scaling', 'binsearch']
-    
-    # Test ablation_study config
-    ablation_path = tuning_dir / "ablation_study.yaml"
-    assert ablation_path.exists(), "ablation_study.yaml not found"
-    
-    with open(ablation_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    assert 'ablation' in config
-    ablation_config = config['ablation']
-    assert 'experiment_name' in ablation_config
-    assert 'parameters' in ablation_config
-    assert 'metrics' in ablation_config
-    assert isinstance(ablation_config['parameters'], dict)
-    assert isinstance(ablation_config['metrics'], list)
-
-
-def test_all_configs_yaml_syntax():
-    """Test that all YAML files have valid syntax."""
-    config_files = list(CONFIG_DIR.rglob("*.yaml"))
-    assert len(config_files) > 0, "No YAML config files found"
-    
-    for config_file in config_files:
-        try:
-            with open(config_file, 'r') as f:
-                yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            pytest.fail(f"Invalid YAML syntax in {config_file}: {e}")
-
-
-def test_config_inheritance():
-    """Test that configs properly inherit from defaults."""
-    defaults_path = CONFIG_DIR / "defaults.yaml"
-    vision_classifier_path = CONFIG_DIR / "vision" / "classifier.yaml"
-    
-    with open(defaults_path, 'r') as f:
-        defaults = yaml.safe_load(f)
-    
-    with open(vision_classifier_path, 'r') as f:
-        classifier_config = yaml.safe_load(f)
-    
-    # Check that classifier config has defaults reference
-    assert 'defaults' in classifier_config
-    assert '/defaults.yaml' in classifier_config['defaults']
-
-
-def test_checkpoint_paths_consistency():
-    """Test that checkpoint paths are consistent across configs."""
-    config_files = list(CONFIG_DIR.rglob("*.yaml"))
-    
-    for config_file in config_files:
-        if config_file.name in ['lr_finder.yaml', 'batch_scaler.yaml']:
-            continue  # Skip tuning configs
-        
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        
-        if 'callbacks' in config:
-            for callback in config['callbacks']:
-                if 'ModelCheckpoint' in str(callback.get('class_path', '')):
-                    init_args = callback.get('init_args', {})
-                    if 'dirpath' in init_args:
-                        dirpath = init_args['dirpath']
-                        assert isinstance(dirpath, str)
-                        assert len(dirpath) > 0
-                        # Should contain checkpoints/ prefix
-                        assert dirpath.startswith('checkpoints/')
-
-
-def test_logger_consistency():
-    """Test that logger configs are consistent."""
-    config_files = list(CONFIG_DIR.rglob("*.yaml"))
-    
-    for config_file in config_files:
-        if config_file.name in ['lr_finder.yaml', 'batch_scaler.yaml']:
-            continue  # Skip tuning configs
-        
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        
-        if 'logger' in config:
-            loggers = config['logger']
-            assert isinstance(loggers, list)
-            
-            for logger in loggers:
-                assert 'class_path' in logger
-                assert 'TensorBoardLogger' in logger['class_path']
-                
-                init_args = logger.get('init_args', {})
-                assert 'save_dir' in init_args
-                assert init_args['save_dir'].startswith('logs/')
-
-
-def test_learning_rate_ranges():
-    """Test that learning rates are in reasonable ranges."""
-    config_files = [
-        CONFIG_DIR / "vision" / "classifier.yaml",
-        CONFIG_DIR / "vision" / "segmenter.yaml",
-        CONFIG_DIR / "nlp" / "char_lm.yaml",
-        CONFIG_DIR / "nlp" / "sentiment.yaml",
-        CONFIG_DIR / "tabular" / "mlp.yaml",
-        CONFIG_DIR / "timeseries" / "forecaster.yaml"
+    missing = [
+        name
+        for name, p in params.items()
+        if p.default is p.empty and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY) and name not in init_args
     ]
-    
-    for config_file in config_files:
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-        
-        if 'model' in config and 'init_args' in config['model']:
-            init_args = config['model']['init_args']
-            if 'learning_rate' in init_args:
-                lr = float(init_args['learning_rate'])
-                assert isinstance(lr, (int, float))
-                assert 1e-6 <= lr <= 1e-1, f"LR {lr} out of range in {config_file}"
+    assert not missing, f"{where}: missing required init_args for {cls.__name__}: {missing}"
+
+
+@pytest.mark.parametrize("path", TRAINING_CONFIGS, ids=[str(p.relative_to(CONFIG_DIR)) for p in TRAINING_CONFIGS])
+def test_training_config_matches_class_signatures(path):
+    cfg = load(path)
+    for section in ("model", "data"):
+        assert "class_path" in cfg[section], f"{path.name}: {section} needs a class_path"
+        cls = resolve(cfg[section]["class_path"])
+        check_init_args(cls, cfg[section].get("init_args", {}), f"{path.name}:{section}")
+
+    for callback in cfg["trainer"].get("callbacks", []):
+        cls = resolve(callback["class_path"])
+        check_init_args(cls, callback.get("init_args", {}), f"{path.name}:callbacks")
+
+    logger = cfg["trainer"].get("logger")
+    if isinstance(logger, dict):
+        check_init_args(resolve(logger["class_path"]), logger.get("init_args", {}), f"{path.name}:logger")
+
+
+@pytest.mark.parametrize("path", TRAINING_CONFIGS, ids=[str(p.relative_to(CONFIG_DIR)) for p in TRAINING_CONFIGS])
+def test_training_config_uses_jsonargparse_layout(path):
+    cfg = load(path)
+    assert set(cfg) <= {
+        "seed_everything",
+        "model",
+        "data",
+        "trainer",
+        "experiment_name",
+        "tags",
+        "notes",
+    }, f"{path.name}: top-level keys must be LightningCLI keys, got {sorted(cfg)}"
+    assert "defaults" not in cfg, "Hydra-style `defaults:` is not supported by LightningCLI"
+    for callback in cfg["trainer"].get("callbacks", []):
+        if callback["class_path"].endswith("ModelCheckpoint"):
+            filename = callback["init_args"].get("filename", "")
+            assert "/" not in filename, "a '/' in ModelCheckpoint.filename creates sub-directories"
+
+
+@pytest.mark.parametrize("path", TRAINING_CONFIGS, ids=[str(p.relative_to(CONFIG_DIR)) for p in TRAINING_CONFIGS])
+def test_config_trains_and_logs_every_monitored_metric(path, tmp_path, monkeypatch):
+    """Each config must complete a fast_dev_run fit, and every `monitor` key must really be logged."""
+    from lmpro.cli import main
+
+    monkeypatch.chdir(tmp_path)  # relative dirpath/save_dir in the configs must not land in the repo
+    cfg = load(path)
+    monitors = {
+        cb["init_args"]["monitor"] for cb in cfg["trainer"].get("callbacks", []) if "monitor" in cb.get("init_args", {})
+    }
+
+    cli = main(
+        [
+            "fit",
+            "--config",
+            str(path),
+            "--data.init_args.num_workers=0",
+            "--data.init_args.persistent_workers=false",
+            "--trainer.accelerator=cpu",
+            "--trainer.devices=1",
+            "--trainer.fast_dev_run=true",
+            "--trainer.default_root_dir",
+            str(tmp_path),
+        ]
+    )
+    logged = set(cli.trainer.callback_metrics)
+    assert cli.trainer.state.finished
+    assert monitors <= logged, f"{path.name} monitors {sorted(monitors - logged)} which the module never logs"
+
+
+def test_defaults_config_is_a_valid_layer():
+    cfg = load(CONFIG_DIR / "defaults.yaml")
+    assert set(cfg) <= {"seed_everything", "trainer"}
+    for callback in cfg["trainer"].get("callbacks", []):
+        check_init_args(resolve(callback["class_path"]), callback.get("init_args", {}), "defaults.yaml:callbacks")
+
+
+def test_tuning_configs_match_tuner_signatures():
+    from lightning.pytorch.tuner import Tuner
+
+    lr = load(CONFIG_DIR / "tuning" / "lr_finder.yaml")["lr_finder"]
+    assert set(lr) <= set(inspect.signature(Tuner.lr_find).parameters)
+    assert lr["min_lr"] < lr["max_lr"]
+
+    scaler = load(CONFIG_DIR / "tuning" / "batch_scaler.yaml")["batch_scaler"]
+    assert set(scaler) <= set(inspect.signature(Tuner.scale_batch_size).parameters)
+    assert scaler["mode"] in ("power", "binsearch")
+
+
+def test_ablation_config_targets_real_keys():
+    ablation = load(CONFIG_DIR / "tuning" / "ablation_study.yaml")["ablation"]
+    base = load(CONFIG_DIR / "vision" / "classifier.yaml")
+    for dotted, values in ablation["parameters"].items():
+        node = base
+        for key in dotted.split("."):
+            assert key in node, f"{dotted} does not exist in classifier.yaml"
+            node = node[key]
+        assert isinstance(values, list) and values
+    for key in ablation.get("trainer_overrides", {}):
+        assert key in inspect.signature(resolve("lightning.pytorch.Trainer").__init__).parameters

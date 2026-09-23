@@ -13,21 +13,15 @@ Usage::
 """
 
 import argparse
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 import torch
-
 
 SUPPORTED_DOMAINS = ["vision", "nlp", "tabular", "timeseries"]
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Generate and cache synthetic datasets"
-    )
+    parser = argparse.ArgumentParser(description="Generate and cache synthetic datasets")
     parser.add_argument(
         "--domains",
         nargs="+",
@@ -57,7 +51,7 @@ def parse_args():
 
 
 def generate_vision(num_samples: int, output_dir: Path) -> None:
-    from lmpro.data.synth_vision import VisionDatasetConfig, SyntheticImageDataset
+    from lmpro.data.synth_vision import SyntheticImageDataset, VisionDatasetConfig
 
     cfg = VisionDatasetConfig(num_samples=num_samples, image_size=(64, 64), num_classes=10)
     for split in ("train", "val", "test"):
@@ -81,7 +75,7 @@ def generate_nlp(num_samples: int, output_dir: Path) -> None:
 
 
 def generate_tabular(num_samples: int, output_dir: Path) -> None:
-    from lmpro.data.synth_tabular import TabularDatasetConfig, SyntheticTabularDataset
+    from lmpro.data.synth_tabular import SyntheticTabularDataset, TabularDatasetConfig
 
     cfg = TabularDatasetConfig(num_samples=num_samples, num_features=20, num_classes=3)
     for split in ("train", "val", "test"):
@@ -94,13 +88,11 @@ def generate_tabular(num_samples: int, output_dir: Path) -> None:
 
 def generate_timeseries(num_samples: int, output_dir: Path) -> None:
     from lmpro.data.synth_timeseries import (
-        TimeSeriesDatasetConfig,
         SyntheticTimeSeriesDataset,
+        TimeSeriesDatasetConfig,
     )
 
-    cfg = TimeSeriesDatasetConfig(
-        num_samples=num_samples, sequence_length=100, prediction_horizon=10
-    )
+    cfg = TimeSeriesDatasetConfig(num_samples=num_samples, sequence_length=100, prediction_horizon=10)
     for split in ("train", "val", "test"):
         ds = SyntheticTimeSeriesDataset(config=cfg, task="forecasting", split=split)
         pt_file = output_dir / f"timeseries_{split}.pt"

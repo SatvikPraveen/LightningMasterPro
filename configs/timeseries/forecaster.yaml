@@ -1,8 +1,6 @@
 # configs/timeseries/forecaster.yaml
-# @package _global_
-
-defaults:
-  - /defaults.yaml
+# python scripts/train.py fit --config configs/timeseries/forecaster.yaml
+# sequence_length / prediction_horizon must agree between model and data.
 
 seed_everything: 42
 
@@ -10,58 +8,60 @@ model:
   class_path: lmpro.modules.timeseries.forecaster.TimeSeriesForecaster
   init_args:
     input_dim: 1
+    output_dim: 1
+    sequence_length: 100
+    prediction_horizon: 10
     hidden_dim: 128
     num_layers: 2
-    sequence_length: 100
-    prediction_length: 10
-    model_type: lstm
-    dropout_rate: 0.1
-    learning_rate: 1e-3
-    weight_decay: 1e-5
+    dropout: 0.1
+    architecture: lstm           # lstm | gru | transformer
+    learning_rate: 1.0e-3
+    weight_decay: 1.0e-5
+    optimizer: adamw
+    scheduler: onecycle
 
 data:
   class_path: lmpro.datamodules.ts_dm.TimeSeriesDataModule
   init_args:
-    data_dir: data/synthetic/
-    dataset_type: univariate
+    task: forecasting
+    data_config:                 # lmpro.data.synth_timeseries.TimeSeriesDatasetConfig (dataclass)
+      num_samples: 2000
+      sequence_length: 100
+      prediction_horizon: 10
+      num_features: 1
+      noise_level: 0.1
     batch_size: 64
     num_workers: 4
     pin_memory: true
-    sequence_length: 100
-    prediction_length: 10
-    normalize: true
+    persistent_workers: true
 
 trainer:
   max_epochs: 30
   accelerator: auto
   devices: 1
-  precision: 16-mixed
+  precision: 32-true
   gradient_clip_val: 1.0
-  accumulate_grad_batches: 1
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
-      dirpath: checkpoints/timeseries/forecaster/
-      filename: "forecaster-{epoch:02d}-{val_mae:.4f}"
-      monitor: val_mae
-      mode: min
-      save_top_k: 3
-      save_last: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_mae
-      mode: min
-      patience: 8
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
+      save_dir: logs
       name: timeseries_forecaster
-      version: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints/timeseries/forecaster
+        filename: "epoch{epoch:02d}-step{step}"
+        auto_insert_metric_name: false
+        monitor: val/mae
+        mode: min
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/mae
+        mode: min
+        patience: 8
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step

@@ -1,121 +1,119 @@
 # tests/test_cli.py
-"""Integration tests for CLI module."""
+"""Behavioural tests for LightningMasterCLI: real parsing, instantiation, linking and a fast_dev_run fit."""
 
-import sys
 from pathlib import Path
+
 import pytest
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer
+from lightning.pytorch.cli import LightningCLI
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from lmpro.cli import LightningMasterCLI, main, nlp_cli, tabular_cli, timeseries_cli, vision_cli
 
+ROOT = Path(__file__).parent.parent
+CONFIGS = ROOT / "configs"
 
-# ─── Import Tests ─────────────────────────────────────────────────────────────
-
-class TestCLIImports:
-    def test_import_lightning_master_cli(self):
-        from lmpro.cli import LightningMasterCLI
-        assert LightningMasterCLI is not None
-
-    def test_import_main(self):
-        from lmpro.cli import main
-        assert callable(main)
-
-    def test_import_vision_cli(self):
-        from lmpro.cli import vision_cli
-        assert callable(vision_cli)
-
-    def test_import_nlp_cli(self):
-        from lmpro.cli import nlp_cli
-        assert callable(nlp_cli)
-
-    def test_import_tabular_cli(self):
-        from lmpro.cli import tabular_cli
-        assert callable(tabular_cli)
-
-    def test_import_timeseries_cli(self):
-        from lmpro.cli import timeseries_cli
-        assert callable(timeseries_cli)
+# Overrides that make every config cheap and side-effect free on CI.
+CPU_OVERRIDES = [
+    "--data.init_args.num_workers=0",
+    "--data.init_args.persistent_workers=false",
+    "--trainer.logger=false",
+    "--trainer.accelerator=cpu",
+    "--trainer.devices=1",
+]
 
 
-# ─── LightningMasterCLI Class ─────────────────────────────────────────────────
-
-class TestLightningMasterCLI:
-    def test_is_subclass_of_lightningcli(self):
-        from lmpro.cli import LightningMasterCLI
-        from lightning.pytorch.cli import LightningCLI
-        assert issubclass(LightningMasterCLI, LightningCLI)
-
-    def test_has_configure_optimizers_helper(self):
-        from lmpro.cli import LightningMasterCLI
-        assert hasattr(LightningMasterCLI, "configure_optimizers_from_config")
-        assert callable(LightningMasterCLI.configure_optimizers_from_config)
-
-    def test_configure_optimizers_returns_dict(self):
-        from lmpro.cli import LightningMasterCLI
-        result = LightningMasterCLI.configure_optimizers_from_config({})
-        assert isinstance(result, dict)
-        assert "optimizer" in result
-
-    def test_configure_optimizers_with_scheduler(self):
-        from lmpro.cli import LightningMasterCLI
-        config = {"lr_scheduler": {"class_path": "torch.optim.lr_scheduler.StepLR"}}
-        result = LightningMasterCLI.configure_optimizers_from_config(config)
-        assert "lr_scheduler" in result
+def test_subclass_of_lightning_cli():
+    assert issubclass(LightningMasterCLI, LightningCLI)
 
 
-# ─── CLI Initialization Defaults ─────────────────────────────────────────────
-
-class TestCLIDefaults:
-    """Test CLI class attributes and statics without actually running training."""
-
-    def test_description_default(self):
-        """Check the description kwarg is accepted by the constructor signature."""
-        import inspect
-        from lmpro.cli import LightningMasterCLI
-        sig = inspect.signature(LightningMasterCLI.__init__)
-        assert "description" in sig.parameters
-
-    def test_env_prefix_default(self):
-        import inspect
-        from lmpro.cli import LightningMasterCLI
-        sig = inspect.signature(LightningMasterCLI.__init__)
-        assert sig.parameters["env_prefix"].default == "LMPRO"
-
-    def test_auto_configure_optimizers_default(self):
-        import inspect
-        from lmpro.cli import LightningMasterCLI
-        sig = inspect.signature(LightningMasterCLI.__init__)
-        assert sig.parameters["auto_configure_optimizers"].default is True
-
-    def test_run_default_true(self):
-        import inspect
-        from lmpro.cli import LightningMasterCLI
-        sig = inspect.signature(LightningMasterCLI.__init__)
-        assert sig.parameters["run"].default is True
+def test_from_config_instantiates_classes_without_running():
+    cli = LightningMasterCLI.from_config(CONFIGS / "vision" / "classifier.yaml", *CPU_OVERRIDES)
+    assert isinstance(cli.model, LightningModule)
+    assert isinstance(cli.datamodule, LightningDataModule)
+    assert isinstance(cli.trainer, Trainer)
+    assert cli.model.hparams.num_classes == 10
+    assert cli.datamodule.num_workers == 0
 
 
-# ─── Domain CLI Function Signatures ──────────────────────────────────────────
+def test_cli_overrides_win_over_config():
+    cli = LightningMasterCLI.from_config(
+        CONFIGS / "tabular" / "mlp.yaml", *CPU_OVERRIDES, "--model.init_args.learning_rate=0.123"
+    )
+    assert cli.model.hparams.learning_rate == pytest.approx(0.123)
 
-class TestDomainCLISignatures:
-    def test_vision_cli_accepts_args_kwarg(self):
-        import inspect
-        from lmpro.cli import vision_cli
-        sig = inspect.signature(vision_cli)
-        assert "args" in sig.parameters
 
-    def test_nlp_cli_accepts_args_kwarg(self):
-        import inspect
-        from lmpro.cli import nlp_cli
-        sig = inspect.signature(nlp_cli)
-        assert "args" in sig.parameters
+def test_experiment_name_is_linked_into_logger_name():
+    cli = LightningMasterCLI.from_config(
+        CONFIGS / "vision" / "classifier.yaml",
+        "--data.init_args.num_workers=0",
+        "--data.init_args.persistent_workers=false",
+        "--experiment_name=my_exp",
+    )
+    assert cli.trainer.logger.name == "my_exp"
 
-    def test_tabular_cli_accepts_args_kwarg(self):
-        import inspect
-        from lmpro.cli import tabular_cli
-        sig = inspect.signature(tabular_cli)
-        assert "args" in sig.parameters
 
-    def test_timeseries_cli_accepts_args_kwarg(self):
-        import inspect
-        from lmpro.cli import timeseries_cli
-        sig = inspect.signature(timeseries_cli)
-        assert "args" in sig.parameters
+def test_fit_fast_dev_run_through_subcommand(tmp_path, monkeypatch):
+    # fast_dev_run replaces the configured logger with a DummyLogger, so LearningRateMonitor still works.
+    monkeypatch.chdir(tmp_path)  # the config's relative checkpoint dirpath must not land in the repo
+    cli = main(
+        [
+            "fit",
+            "--config",
+            str(CONFIGS / "vision" / "classifier.yaml"),
+            "--data.init_args.num_workers=0",
+            "--data.init_args.persistent_workers=false",
+            "--trainer.accelerator=cpu",
+            "--trainer.devices=1",
+            "--trainer.fast_dev_run=true",
+            "--trainer.default_root_dir",
+            str(tmp_path),
+        ]
+    )
+    assert cli.trainer.state.finished
+    assert "val/loss" in cli.trainer.callback_metrics
+
+
+def test_unknown_init_arg_is_rejected():
+    with pytest.raises(SystemExit):
+        LightningMasterCLI.from_config(
+            CONFIGS / "vision" / "classifier.yaml", *CPU_OVERRIDES, "--model.init_args.backbone=resnet18"
+        )
+
+
+@pytest.mark.parametrize(
+    ("domain_cli", "data_args", "expected_attr", "source_attr"),
+    [
+        (vision_cli, ["--data.data_config.num_classes=5"], "num_classes", "num_classes"),
+        (nlp_cli, ["--data.task=language_modeling"], "vocab_size", "vocab_size"),
+        (tabular_cli, ["--data.data_config.num_features=7", "--model.output_dim=3"], "input_dim", "num_features"),
+    ],
+)
+def test_domain_cli_links_data_to_model(domain_cli, data_args, expected_attr, source_attr):
+    """link_arguments(apply_on="instantiate") fills the model size from the instantiated datamodule."""
+    cli = domain_cli(
+        [
+            *data_args,
+            "--data.num_workers=0",
+            "--data.persistent_workers=false",
+            "--trainer.logger=false",
+            "--trainer.accelerator=cpu",
+        ],
+        run=False,
+    )
+    assert getattr(cli.model.hparams, expected_attr) == getattr(cli.datamodule, source_attr)
+
+
+def test_timeseries_cli_instantiates():
+    cli = timeseries_cli(
+        [
+            "--model.input_dim=1",
+            "--model.output_dim=1",
+            "--model.sequence_length=100",
+            "--model.prediction_horizon=10",
+            "--data.num_workers=0",
+            "--data.persistent_workers=false",
+            "--trainer.logger=false",
+        ],
+        run=False,
+    )
+    assert isinstance(cli.model, LightningModule)

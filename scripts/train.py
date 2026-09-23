@@ -1,26 +1,23 @@
 # scripts/train.py
-"""Thin wrapper around LightningCLI for training models."""
+"""Train, validate, test or predict with any config via LightningCLI subcommands.
 
-import sys
-from pathlib import Path
+Examples::
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    python scripts/train.py fit --config configs/vision/classifier.yaml
+    python scripts/train.py fit --config configs/nlp/sentiment.yaml --trainer.max_epochs 3
+    python scripts/train.py test --config configs/tabular/mlp.yaml --ckpt_path checkpoints/tabular/mlp/last.ckpt
+    python scripts/train.py fit --config configs/vision/classifier.yaml --print_config
+
+The model and datamodule classes come from the ``class_path`` entries in the YAML,
+so a single entry point serves every domain.
+"""
 
 from lmpro.cli import LightningMasterCLI
 
 
-def main():
-    """Main training function using LightningCLI."""
-    # The LightningCLI with run=True (default) automatically executes the training
-    # when instantiated, so no need to explicitly call cli.fit()
-    cli = LightningMasterCLI(
-        save_config_callback=True,
-        auto_configure_optimizers=False,
-        parser_kwargs={"parser_mode": "omegaconf"}
-    )
-    return cli
-    
+def main() -> LightningMasterCLI:
+    return LightningMasterCLI(description="LightningMasterPro training CLI")
+
 
 if __name__ == "__main__":
     main()

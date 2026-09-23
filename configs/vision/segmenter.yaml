@@ -1,62 +1,64 @@
 # configs/vision/segmenter.yaml
-# @package _global_
-
-defaults:
-  - /defaults.yaml
+# python scripts/train.py fit --config configs/vision/segmenter.yaml
 
 seed_everything: 42
 
 model:
   class_path: lmpro.modules.vision.segmenter.VisionSegmenter
   init_args:
-    backbone: resnet34
-    num_classes: 21
-    learning_rate: 1e-4
-    weight_decay: 1e-4
-    use_aux_loss: true
+    num_classes: 4
+    input_channels: 3
+    hidden_dims: [32, 64, 128, 256]
+    dropout: 0.1
+    learning_rate: 1.0e-4
+    weight_decay: 1.0e-4
+    optimizer: adamw
+    scheduler: onecycle
+    dice_weight: 0.5
 
 data:
   class_path: lmpro.datamodules.vision_dm.VisionDataModule
   init_args:
-    data_dir: data/synthetic/
-    dataset_type: segmentation
+    task: segmentation
+    data_config:
+      num_samples: 1000
+      image_size: [64, 64]
+      num_channels: 3
+      num_classes: 4
+      noise_level: 0.1
     batch_size: 16
     num_workers: 4
     pin_memory: true
-    image_size: [256, 256]
-    augment: true
+    persistent_workers: true
 
 trainer:
   max_epochs: 30
   accelerator: auto
   devices: 1
-  precision: 16-mixed
+  precision: 32-true
   gradient_clip_val: 1.0
   accumulate_grad_batches: 4
-
-callbacks:
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
-      dirpath: checkpoints/vision/segmenter/
-      filename: "segmenter-{epoch:02d}-{val_iou:.3f}"
-      monitor: val_iou
-      mode: max
-      save_top_k: 3
-      save_last: true
-
-  - class_path: lightning.pytorch.callbacks.EarlyStopping
-    init_args:
-      monitor: val_iou
-      mode: max
-      patience: 10
-
-  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-    init_args:
-      logging_interval: step
-
-logger:
-  - class_path: lightning.pytorch.loggers.TensorBoardLogger
-    init_args:
-      save_dir: logs/
+      save_dir: logs
       name: vision_segmenter
-      version: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints/vision/segmenter
+        filename: "epoch{epoch:02d}-step{step}"
+        auto_insert_metric_name: false
+        monitor: val/iou
+        mode: max
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/iou
+        mode: max
+        patience: 10
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
