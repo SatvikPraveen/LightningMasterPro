@@ -2,10 +2,10 @@
 
 # Core ML/DL
 torch>=2.14.1
-torchvision>=0.29.1
+torchvision>=0.29.2
 lightning>=2.6.6
 torchmetrics>=1.9.0
-jsonargparse[signatures]>=4.52.0
+jsonargparse[signatures]>=4.53.0
 
 # Data handling
 numpy>=2.2.6
